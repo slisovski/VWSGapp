@@ -39,23 +39,24 @@ ui <- fluidPage(
                           numericInput("lat.calib", 
                                        label = "Deployment latitude",  
                                        value = NULL,
-                                       step = 0.00001),
+                                       step = 0.00001)
                             
-                          conditionalPanel(
-                            condition = "output.dateSlider == true",
-                            sliderInput("Dates",
-                                      "Dates:",
-                                      min   = as.Date("1970-01-01", "%Y-%m-%d"),
-                                      max   = as.Date("1970-12-30", "%Y-%m-%d"),
-                                      value = as.Date(c("1970-01-01", "1970-12-30"), "%Y-%m-%d"),
-                                      timeFormat="%Y-%m-%d")
-                            
-                        )
+                        #   conditionalPanel(
+                        #     condition = "output.dateSlider == true",
+                        #     sliderInput("Dates",
+                        #               "Dates:",
+                        #               min   = as.Date("1970-01-01", "%Y-%m-%d"),
+                        #               max   = as.Date("1970-12-30", "%Y-%m-%d"),
+                        #               value = as.Date(c("1970-01-01", "1970-12-30"), "%Y-%m-%d"),
+                        #               timeFormat="%Y-%m-%d")
+                        #     
+                        # )
                           
                         ),
                         
                         mainPanel(
-                          plotOutput("lightImage0"),
+                          h4("Draw rectangle to inspect specific light recordings"),
+                          uiOutput("selectLightSeries"),
                           plotOutput("lightSeries")
                         )
                 
@@ -75,16 +76,24 @@ ui <- fluidPage(
                           br(),
                           
                           conditionalPanel(
-                            condition = "output.dateSlider == true",
-                            h4("1. Step: Select range"),
-                            actionButton("Step1.1", "accept"),
-                            actionButton("Step1.2", "reset")
+                            condition = "output.Step1 == true",
+                            h4("1.Select range"),
+                            actionButton("Step1", "accept", icon = icon("check"))
+                          ),
+                          
+                          br(),
+                          
+                          conditionalPanel(
+                            condition = "output.Step2 !== true",
+                            h4("2. Twilight selection"),
+                            actionButton("Step2", "accept", icon = icon("check"))
                           )
                         ),
                         mainPanel(
                           conditionalPanel(
-                            condition = "output.dateSlider == true",
+                            condition = "output.Step1 == true && output.Step2 == true",
                                 h4("Draw rectangle to select range"),
+                                plotOutput("lightRange", height = 50),
                                 uiOutput("selectRangePlot")
                           )
                           )
@@ -101,6 +110,7 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   
+  values <- reactiveValues()
   
   #########################
   #Read in a dataset from a file.
@@ -127,8 +137,8 @@ server <- function(input, output, session) {
           tab <- readMTlux(inFile$datapath) #read the data into a dataframe called d.lig
           tab$Light<-log(tab$Light)
           
-          output$dateSlider <- reactive(ncol(raw())>0)
-          outputOptions(output, c("dateSlider"), suspendWhenHidden = FALSE)
+          output$Step1 <- reactive(ncol(raw())>0)
+          outputOptions(output, c("Step1"), suspendWhenHidden = FALSE)
           
           return(tab)
           
@@ -139,23 +149,29 @@ server <- function(input, output, session) {
   
   observe({
     if(!is.null(input$filename)) {
+      if(is.null(input$select_range_brush$xmin)) {
       min <- format(raw()$Date[1], "%Y-%m-%d")
       max <- format(raw()$Date[nrow(raw())], "%Y-%m-%d")
+      } else {
+        min <- format(as.POSIXct(input$select_range_brush$xmin, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+        max <- format(as.POSIXct(input$select_range_brush$xmax, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+      }
     } else {
       min <- "2000-01-01"
       max <- "2025-12-31"
     }
     # Control the value, min, max, and step.
     # Step size is 2 when input value is even; 1 when value is odd.
-    updateSliderInput(session, "Dates",
-                      min   = as.Date(min, "%Y-%m-%d"),
-                      max   = as.Date(max, "%Y-%m-%d"),
-                      value = as.Date(c(min, max), "%Y-%m-%d"))
-    updateSliderInput(session, "Range",
-                      min   = as.Date(min, "%Y-%m-%d"),
-                      max   = as.Date(max, "%Y-%m-%d"),
-                      value = as.Date(c(min, max), "%Y-%m-%d"))
+    # updateSliderInput(session, "Dates",
+    #                   min   = as.Date(min, "%Y-%m-%d"),
+    #                   max   = as.Date(max, "%Y-%m-%d"),
+    #                   value = as.Date(c(min, max), "%Y-%m-%d"))
   })
+  
+  
+  #############################
+  #### Select Data Plots ######
+  #############################
   
   output$lightImage0 <- renderPlot({
     
@@ -168,8 +184,88 @@ server <- function(input, output, session) {
         tsimageDeploymentLines(raw()$Date, input$lon.calib, input$lat.calib, offset = input$offset,
                                lwd = 4, col = adjustcolor("orange", alpha.f = 0.6))
       }
+    }
+    
+  })
+  
+  
+  output$selectLightSeries  <- renderUI({
+    plotOutput("lightImage0", height=400,
+               brush = brushOpts(id = "select_range_brush0")
+    )
+  })
+  
+  output$lightSeries <- renderPlot({
+    
+    if(is.null(input$filename)) {
+      plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
+    } else {
       
-      abline(v = as.POSIXct(input$Dates, format = "%Y-%m-%d"), lty = 2, lwd = 2, col = adjustcolor("orange", alpha.f = 0.7))
+      if(!is.null(input$filename)) {
+        if(is.null(input$select_range_brush0$xmin)) {
+          min <- format(raw()$Date[1], "%Y-%m-%d")
+          max <- format(raw()$Date[nrow(raw())], "%Y-%m-%d")
+        } else {
+          min <- format(as.POSIXct(input$select_range_brush0$xmin, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+          max <- format(as.POSIXct(input$select_range_brush0$xmax, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+        }
+      } else {
+        min <- "2000-01-01"
+        max <- "2025-12-31"
+      }
+      
+      
+      range <- as.POSIXct(raw()$Date) > as.POSIXct(min, format = "%Y-%m-%d") &
+               as.POSIXct(raw()$Date) < as.POSIXct(max, format = "%Y-%m-%d")
+      
+      with(raw()[range,], plot(Date, Light, type = "o", pch = 16, cex = 0.25, xlab = "", ylab = "log light", las = 1,
+                               ylim = range(Light, na.rm = T)))
+    }
+    
+  })
+
+  
+  #############################
+  #### Select Range Plots #####
+  #############################
+  
+  observe({
+    if(!is.null(input$select_range_brush1)) {
+      values$selectedRange <- input$select_range_brush1
+    }
+      output$Step2 <- reactive(input$Step1 %% 2 == 0)
+      outputOptions(output, c("Step2"), suspendWhenHidden = FALSE)
+  })
+  
+  
+  output$lightRange <- renderPlot({
+    
+    if(is.null(input$filename) | (input$Step1 > 0 & input$Step1 %% 2 != 0)) {
+      opar <- par(mar = c(0, 4, 1, 2))
+      plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
+      par(opar)
+    } else {
+      
+      if(!is.null(values$selectedRange)) {
+        
+        min <- format(as.POSIXct(values$selectedRange$xmin, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+        max <- format(as.POSIXct(values$selectedRange$xmax, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+        
+        range <- which(as.POSIXct(raw()$Date) > as.POSIXct(min, format = "%Y-%m-%d") &
+                       as.POSIXct(raw()$Date) < as.POSIXct(max, format = "%Y-%m-%d"))
+        opar <- par(mar = c(0, 4, 1, 2))
+        plot(NA, xlim = c(1, nrow(raw())), ylim = c(0,1), xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "", xaxs = "i")
+        rect(min(range), 0, max(range), 1, col = "firebrick", border = NA)
+        par(opar)
+        
+      } else {
+        
+        opar <- par(mar = c(0, 4, 1, 2))
+        plot(NA, xlim = c(1, nrow(raw())), ylim = c(0,1), xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "", xaxs = "i")
+        rect(1, 0, nrow(raw()), 1, col = "firebrick", border = NA)
+        par(opar)
+        
+      }
     }
     
   })
@@ -177,10 +273,28 @@ server <- function(input, output, session) {
   
   output$lightImage1 <- renderPlot({
     
-    if(is.null(input$filename)) {
+    if(is.null(input$filename) ) {
       plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
     } else {
-      lightImage(raw(), offset = input$offset, zlim = c(0, 10), dt = 120)
+      
+      if(!is.null(values$selectedRange) & input$Step1 %% 2 != 0) {
+        
+        min <- format(as.POSIXct(values$selectedRange$xmin, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+        max <- format(as.POSIXct(values$selectedRange$xmax, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+        
+        range <- as.POSIXct(raw()$Date) > as.POSIXct(min, format = "%Y-%m-%d") &
+                 as.POSIXct(raw()$Date) < as.POSIXct(max, format = "%Y-%m-%d")
+        
+        raw_select <- raw()[range,]
+        opar <- par(mar = c(3, 4, 1, 2))
+        lightImage(raw_select, offset = input$offset, zlim = c(0, 10), dt = 120)
+        par(opar)
+      } else {
+        raw_select <- raw()
+        opar <- par(mar = c(3, 4, 1, 2))
+        lightImage(raw_select, offset = input$offset, zlim = c(0, 10), dt = 120)
+        par(opar)
+      }
     }
     
   })
@@ -188,25 +302,26 @@ server <- function(input, output, session) {
   
   output$selectRangePlot <- renderUI({
     plotOutput("lightImage1", height=500,
-               brush = brushOpts(id = "select_range_brush")
+               brush = brushOpts(id = "select_range_brush1", resetOnNew = TRUE)
     )
   })
   
+
+
   
-  output$lightSeries <- renderPlot({
+  observe({
+    if(input$Step1 %% 2 != 0) {
     
-    if(is.null(input$filename)) {
-      plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
+    updateActionButton(session, "Step1",
+                       label = "reset",
+                       icon = icon("times"))
     } else {
-        
-      range <- as.POSIXct(raw()$Date) > as.POSIXct(input$Dates[1], format = "%Y-%m-%d") &
-               as.POSIXct(raw()$Date) < as.POSIXct(input$Dates[2], format = "%Y-%m-%d")
-      
-      with(raw()[range,], plot(Date, Light, type = "o", pch = 16, cex = 0.25, xlab = "", ylab = "log light", las = 1,
-                                 ylim = range(Light, na.rm = T)))
+    updateActionButton(session, "Step1",
+                       label = "accept",
+                       icon = icon("check"))
     }
-    
   })
+
 }
 
 
