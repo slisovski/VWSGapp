@@ -1,5 +1,6 @@
 library(shiny)
 library(markdown)
+library(BAStag)
 library(TwGeos)
 library(SGAT)
 
@@ -40,18 +41,6 @@ ui <- fluidPage(
                                        label = "Deployment latitude",  
                                        value = NULL,
                                        step = 0.00001)
-                            
-                        #   conditionalPanel(
-                        #     condition = "output.dateSlider == true",
-                        #     sliderInput("Dates",
-                        #               "Dates:",
-                        #               min   = as.Date("1970-01-01", "%Y-%m-%d"),
-                        #               max   = as.Date("1970-12-30", "%Y-%m-%d"),
-                        #               value = as.Date(c("1970-01-01", "1970-12-30"), "%Y-%m-%d"),
-                        #               timeFormat="%Y-%m-%d")
-                        #     
-                        # )
-                          
                         ),
                         
                         mainPanel(
@@ -95,6 +84,11 @@ ui <- fluidPage(
                                 h4("Draw rectangle to select range"),
                                 plotOutput("lightRange", height = 50),
                                 uiOutput("selectRangePlot")
+                          ),
+                            conditionalPanel(
+                              condition = "output.Step2 !== true",
+                              h4("Select points during the night"),
+                              uiOutput("nightSelectPlot")
                           )
                           )
                       )
@@ -116,14 +110,9 @@ server <- function(input, output, session) {
   #Read in a dataset from a file.
   raw <- reactive({
     
-    #req() ensures that if file hasn't been read in yet,
-    #the rest of the code doesn't crash with errors.
-    #https://shiny.rstudio.com/articles/req.html
     req(input$filename)
     inFile <- input$filename
     
-    #Nesting ifelse shows what to do if inFile is null (no entry)
-    #and what to do for each input radio button type.
     if (is.null(inFile)) {
       return(NULL)
       } else
@@ -160,12 +149,6 @@ server <- function(input, output, session) {
       min <- "2000-01-01"
       max <- "2025-12-31"
     }
-    # Control the value, min, max, and step.
-    # Step size is 2 when input value is even; 1 when value is odd.
-    # updateSliderInput(session, "Dates",
-    #                   min   = as.Date(min, "%Y-%m-%d"),
-    #                   max   = as.Date(max, "%Y-%m-%d"),
-    #                   value = as.Date(c(min, max), "%Y-%m-%d"))
   })
   
   
@@ -306,8 +289,6 @@ server <- function(input, output, session) {
     )
   })
   
-
-
   
   observe({
     if(input$Step1 %% 2 != 0) {
@@ -321,9 +302,52 @@ server <- function(input, output, session) {
                        icon = icon("check"))
     }
   })
+  
+  
+  raw_select <- reactive({
+    
+    if(!is.null(values$selectedRange) & input$Step1 %% 2 != 0) {
+      
+      min <- format(as.POSIXct(values$selectedRange$xmin, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+      max <- format(as.POSIXct(values$selectedRange$xmax, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+      
+      range <- as.POSIXct(raw()$Date) > as.POSIXct(min, format = "%Y-%m-%d") &
+        as.POSIXct(raw()$Date) < as.POSIXct(max, format = "%Y-%m-%d")
+      
+      raw_select <- raw()[range,]
+      
+      return(raw_select)
+      
+    } else return(NULL)
+    
 
+  })
+  
+  
+  #############################
+  #### Twilight Annotation ####
+  #############################
+  
+  output$nightSelect <- renderPlot({
+    
+    if(is.null(input$filename) | input$Step1 %% 2 != 0) {
+      
+      opar <- par(mar = c(3, 4, 1, 2))
+      lightImage(raw_select(), offset = input$offset, zlim = c(0, 10), dt = 120)
+      par(opar)
+        
+    }
+    
+  })
+  
+  output$nightSelectPlot <- renderUI({
+    plotOutput("nightSelect", height=400,
+               brush = brushOpts(id = "select_range_brush1", resetOnNew = TRUE)
+    )
+  })
+  
+  
 }
-
 
 
 
