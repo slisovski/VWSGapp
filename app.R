@@ -95,8 +95,9 @@ ui <- fluidPage(
                           
                           conditionalPanel(
                             condition = "output.Step3 == true",
-                            h4("3. Twilight edit"),
-                            actionButton("accept_edit", "accept", icon = icon("check"))
+                            h4("Download Twilights"),
+                            # actionButton("twl_download", "", icon = icon("file-download")),
+                            downloadButton("downloadTwl", "", icon = icon("file-download"))
                           )
                         ),
                         mainPanel(
@@ -114,7 +115,7 @@ ui <- fluidPage(
                           ,
                           conditionalPanel(
                             condition = "output.Step3 == true",
-                            plotOutput("twilightAll", height=400),
+                            uiOutput("selectTwilightPlot"),
                             plotOutput("selectedTwilight", height=400,
                                        click = clickOpts(id = "new_edit", clip = FALSE))
                           ),
@@ -390,8 +391,6 @@ server <- function(input, output, session) {
     
   })
   
-  
-  
   output$nightSelect <- renderPlot({
     
     if(is.null(input$filename) | input$accept_range %% 2 != 0) {
@@ -423,17 +422,15 @@ server <- function(input, output, session) {
       
       if(any(!is.null(nightClick$x))) {
 
-        day                 <- .POSIXct(nightClick$x[!is.null(nightClick$x)], "GMT")
-        hour                <- nightClick$y[!is.null(nightClick$y)]%%24 *60*60
-        
-        seed                <- .POSIXct(day + hour, "GMT")
+        seed                <- as.POSIXct(as.numeric(nightClick$x[!is.null(nightClick$x)]),
+                                          origin = "1970-01-01", t = "GMT")
         
         twilights           <- findTwilights(raw_select(), threshold = input$threshold, 
                                              include = seed,
                                              extend = 0, dark.min = 0)
-        twilights$Deleted   <- logical(nrow(twilights))
+        twilights$Deleted   <- rep(FALSE, nrow(twilights))
         twilights$Marker    <- integer(nrow(twilights))
-        twilights$Inserted  <- logical(nrow(twilights))
+        twilights$Inserted  <- rep(FALSE, nrow(twilights))
         
         tsimagePoints(twilights$Twilight, offset = input$offset, pch = 16, cex = 1.5,
                       col = ifelse(twilights$Rise, "dodgerblue", "firebrick"))
@@ -451,6 +448,7 @@ server <- function(input, output, session) {
       updateActionButton(session, "accept_twl",
                          label = "reset",
                          icon = icon("times"))
+      
     } else {
       if(all(is.null(nightClick$x))) {
         updateActionButton(session, "accept_twl",
@@ -469,19 +467,13 @@ server <- function(input, output, session) {
   twl <- reactive({
     
     if(any(!is.null(nightClick$x))) {
-      
-      day                 <- .POSIXct(nightClick$x[!is.null(nightClick$x)], "GMT")
-      hour                <- nightClick$y[!is.null(nightClick$y)]%%24 *60*60
-      seed                <- .POSIXct(day + hour, "GMT")
-      
+      seed                <- as.POSIXct(as.numeric(nightClick$x[!is.null(nightClick$x)]),
+                                        origin = "1970-01-01", t = "GMT")
       twilights           <- findTwilights(raw_select(), threshold = input$threshold, 
                                            include = seed,
                                            extend = 0, dark.min = 0)
       twilights$Deleted   <- logical(nrow(twilights))
-      twilights$Marker    <- integer(nrow(twilights))
-      twilights$Inserted  <- logical(nrow(twilights))
       twilights$Twilight3 <- twilights$Twilight
-      
       
       return(twilights)
       
@@ -494,32 +486,43 @@ server <- function(input, output, session) {
   #### 2.4 Edit twilights #####
   ##########################
   
-  event   <- reactiveVal(1)
-  edit    <- reactiveValues(new = NULL, twilight = NULL, rise = NULL, key = NULL)
+  edit    <- reactiveValues(new = NULL, twilight = NULL, rise = NULL, deleted = NULL, key = NULL, event = 1)
   
   observe({
     if(!is.null(twl())) {
       edit$twilight <- as.POSIXct(as.numeric(isolate(twl()$Twilight)), origin = "1970-01-01", tz = "GMT")
       edit$rise     <- isolate(twl()$Rise)
+      edit$deleted  <- isolate(twl()$Deleted)
     }
   })
   
-  output$results = renderPrint({
-    edit$key
+  observeEvent(input$accept_twl, {
+    output$Step4 <- reactive(input$accept_twl %% 2 != 0)
+    outputOptions(output, c("Step4"), suspendWhenHidden = FALSE)
+  })
+  
+  observe({
+    if(!is.null(input$select_ts)) {
+    edit$event <- which.min(abs(edit$twilight - as.POSIXct(as.numeric(input$select_ts$x), origin = "1970-01-01", tz = "GMT")))
+    }
   })
   
   observeEvent(input$trigger,{
-    
     edit$key <- input$down
-    
     if(!is.null(edit$new) && edit$key==65) {
-      
-      edit$twilight[event()] <- edit$new
-    
-      edit$key <- NULL
+      edit$twilight[edit$event] <- edit$new
       edit$new <- NULL
-      
-    } 
+    }
+    if(edit$key==68) {
+      edit$deleted[edit$event] <- !edit$deleted[edit$event]
+      edit$new <- NULL
+    }
+    if(edit$key==37 && edit$event>1) {
+      edit$event <- edit$event-1
+    }
+    if(edit$key==39 && edit$event<length(edit$twilight)) {
+      edit$event <- edit$event+1
+    }
   })
   
   observeEvent(twlEdit_slow(), {
@@ -532,29 +535,35 @@ server <- function(input, output, session) {
       opar <- par(mar = c(3, 4, 3, 2))
 
       lightImage(raw_select(), offset = input$offset, zlim = c(0, 10), dt = 120)
-      tsimagePoints(edit$twilight, offset = input$offset, pch = 16, cex = 1.15,
-                    col = ifelse(edit$rise, "dodgerblue", "firebrick"))
-      tsimagePoints(edit$twilight[event()], offset = input$offset, pch = "x", cex = 1.15,
+      tsimagePoints(edit$twilight, offset = input$offset, pch = 16, cex = 1.2,
+                    col = ifelse(edit$deleted, "grey40", ifelse(edit$rise, "dodgerblue", "firebrick")))
+      tsimagePoints(edit$twilight[edit$event], offset = input$offset, pch = "x", cex = 1.2,
                     col = "darkgrey")
       par(opar)
 
+  })
+  
+  output$selectTwilightPlot <- renderUI({
+    plotOutput("twilightAll", height=400,
+               click = clickOpts(id = "select_ts", clip = FALSE)
+    )
   })
 
 
   output$selectedTwilight <- renderPlot({
     
     tsT <- raw_select()
-    ts0 <- tsT[tsT$Date >=  twl()$Twilight[event()]-12*60*60 &
-               tsT$Date <=  twl()$Twilight[event()]+12*60*60,]
-    ts1 <- tsT[tsT$Date >= (twl()$Twilight3[event()]-12*60*60)+24*60*60 &
-               tsT$Date <= (twl()$Twilight3[event()]+12*60*60)+24*60*60,]
-    ts2 <- tsT[tsT$Date >= (twl()$Twilight3[event()]-12*60*60)-24*60*60 &
-               tsT$Date <= (twl()$Twilight3[event()]+12*60*60)-24*60*60,]
+    ts0 <- tsT[tsT$Date >=  twl()$Twilight[edit$event]-12*60*60 &
+               tsT$Date <=  twl()$Twilight[edit$event]+12*60*60,]
+    ts1 <- tsT[tsT$Date >= (twl()$Twilight3[edit$event]-12*60*60)+24*60*60 &
+               tsT$Date <= (twl()$Twilight3[edit$event]+12*60*60)+24*60*60,]
+    ts2 <- tsT[tsT$Date >= (twl()$Twilight3[edit$event]-12*60*60)-24*60*60 &
+               tsT$Date <= (twl()$Twilight3[edit$event]+12*60*60)-24*60*60,]
 
     twlT <- twl()
-    twl0 <- twlT[twlT$Twilight >= twlT$Twilight[event()]-12*60*60 &
-                 twlT$Twilight <= twlT$Twilight[event()]+12*60*60 &
-                 twlT$Rise     == twlT$Rise[event()],]
+    twl0 <- twlT[twlT$Twilight >= twlT$Twilight[edit$event]-12*60*60 &
+                 twlT$Twilight <= twlT$Twilight[edit$event]+12*60*60 &
+                 twlT$Rise     == twlT$Rise[edit$event],]
 
     opar <- par(mar = c(3, 4, 3, 2), las = 1)
     plot(ts0$Date, ts0$Light, type = "l", col = "black", lwd = 1.6, xlab = "Date", ylab = "Light")
@@ -566,18 +575,42 @@ server <- function(input, output, session) {
     par(new = TRUE)
     plot(ts0$Date, ts0$Light, type = "n", xlab = "", ylab = "", xaxt = "n", yaxt = "n")
     abline(h = input$threshold, lty = 2, col = "grey20")
-    abline(v = edit$twilight[event()], col = "grey80", lwd = 1.5)
+    abline(v = edit$twilight[edit$event], col = "grey80", lwd = 1.5, lty = ifelse(edit$deleted[edit$event], 3, 1))
     
     if(!is.null(edit$new)) {
-      points(edit$new, input$threshold, pch = 16, cex = 1.8, col = "red")
-    } else points(edit$twilight[event()], input$threshold, pch = 16, cex = 1.8, col = "red")
+      points(edit$new, input$threshold, pch = 16, cex = 1.8, col = ifelse(edit$deleted[edit$event], "grey40", "red"))
+    } else points(edit$twilight[edit$event], input$threshold, pch = 16, cex = 1.8, col = ifelse(edit$deleted[edit$event], "grey40", "red"))
 
     par(opar)
 
   })
   
   twlEdit_slow <- debounce(reactive(input$new_edit), 300)
-  # keydown_slow <- debounce(reactive(input$down), 300)
+  
+  
+  # twl_final <- reactive({
+  #   if(!is.null(edit$twilight)) {
+  #     # tab <- data.frame(Twilight  = edit$twilight,
+  #     #                   Rise      = edit$rise,
+  #     #                   Deleted   = edit$deleted,
+  #     #                   Marker    = rep(NULL, length(edit$twilight)),
+  #     #                   Inserted  = rep(FALSE, length(edit$twilight)),
+  #     #                   Twilight3 = isolate(twl()$Twilight3),
+  #     #                   Marker3   = rep(NULL, length(edit$twilight)))
+  #     return(twl())
+  #   } else {
+  #     tab <- data.frame(Twilight  = isolate(twl()$Twilight),
+  #                       Rise      = isolate(twl()$Rise),
+  #                       Deleted   = isolate(twl()$Deleted),
+  #                       Marker    = rep(NULL, nrow(twl())),
+  #                       Inserted  = rep(FALSE, nrow(twl())),
+  #                       Twilight3 = isolate(twl()$Twilight3),
+  #                       Marker3   = rep(NULL, lnrow(twl())))
+  #     return(tab)
+  #   }
+  # })
+  
+  
   
 }
 
