@@ -1,13 +1,13 @@
-name: vwsgapp
-title:
+name: VWSGapp
+title: VWSGapp
 username:
 account: slisovski
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 1144736
-bundleId: 2387865
+bundleId: 2396409
 url: https://slisovski.shinyapps.io/vwsgapp/
-when: 1567686091.7935
+when: 1567932960.69879
 asMultiple: FALSE
 asStatic: FALSE
 ignoredFiles: images/logo.jpg

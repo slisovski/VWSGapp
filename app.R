@@ -1,20 +1,29 @@
 library(shiny)
 library(markdown)
-# library(BAStag)
 library(TwGeos)
 library(SGAT)
 
-# Define UI for application that draws a histogram
 ui <- fluidPage(
+  
+  tags$script('
+              $(document).on("keydown", function (e) {
+              Shiny.onInputChange("down", [e.which]);
+              Shiny.onInputChange("trigger", Math.random());
+              });'
+  ),
   
   navbarPage("VWSGapp", id = "navbar",
              
+             ######################
+             ##### 1. Light data ##
+             ###################
              tabPanel("Light data",
 
                       titlePanel("Select raw light recordings"),
                       
                       sidebarLayout(
                         sidebarPanel(
+                          
                           radioButtons("filetype", 
                                        label = "Select your filetype before browsing for your file",
                                        choices = list(".lux",
@@ -51,6 +60,11 @@ ui <- fluidPage(
                   ) ## end Sidebar Panel
                   
              ), ## tabPanel (Data)
+             
+             
+             ######################
+             ##### 2. Twilight ####
+             ###################
              tabPanel("Twilight",
                       
                       titlePanel("Twilight Annotation"),
@@ -96,20 +110,27 @@ ui <- fluidPage(
                               plotOutput("nightSelect", height=400,
                                          click = clickOpts(id = "night_click")),
                               plotOutput("twilights", height=400)
-                          )
+                              )
                           ,
                           conditionalPanel(
                             condition = "output.Step3 == true",
                             plotOutput("twilightAll", height=400),
-                            plotOutput("selectedTwilight", height=400)
-                          )
+                            plotOutput("selectedTwilight", height=400,
+                                       click = clickOpts(id = "new_edit", clip = FALSE))
+                          ),
+                          verbatimTextOutput("results")
                         )
                       )
             ), ## tabPanel (Twilight)
-            tabPanel("Calibration"),
-            tabPanel("Breeding site"),
-            tabPanel("Breeding performance"),
-            tabPanel("Location estimates")
+            
+             ######################
+             ##### 3. Calibration #
+             ######################
+            
+             tabPanel("Calibration"),
+             tabPanel("Breeding site"),
+             tabPanel("Breeding performance"),
+             tabPanel("Location estimates")
             
       ) ## navbarPage
 ) ## ui
@@ -117,10 +138,8 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   
-  values <- reactiveValues()
-  
   #############################
-  #### Read Data ##############
+  #### 1. Read Data ###########
   ##########################
   
   raw <- reactive({
@@ -166,11 +185,10 @@ server <- function(input, output, session) {
     }
   })
   
-  
-  
+
   
   #############################
-  #### Select Data Plots ######
+  #### 2.1 Select Data Plots ##
   ##########################
   
   output$lightImage0 <- renderPlot({
@@ -229,7 +247,7 @@ server <- function(input, output, session) {
   
   
   #############################
-  #### Select Range Plots #####
+  #### 2.2 Select Range Plots #
   ##########################
   
   selectedRange <- reactiveValues(min = NULL, max = NULL)
@@ -357,14 +375,8 @@ server <- function(input, output, session) {
 
   })
   
-  
-  
-  
-  
-  
-  
   #############################
-  #### Find twilights #########
+  #### 2.3 Find twilights #####
   ##########################
   
   nightClick <- reactiveValues(x=NULL, y=NULL)
@@ -442,7 +454,7 @@ server <- function(input, output, session) {
     } else {
       if(all(is.null(nightClick$x))) {
         updateActionButton(session, "accept_twl",
-                           label = "no range selected",
+                           label = "no twilights selected",
                            icon = icon(""))
       } else {
         updateActionButton(session, "accept_twl",
@@ -468,6 +480,8 @@ server <- function(input, output, session) {
       twilights$Deleted   <- logical(nrow(twilights))
       twilights$Marker    <- integer(nrow(twilights))
       twilights$Inserted  <- logical(nrow(twilights))
+      twilights$Twilight3 <- twilights$Twilight
+      
       
       return(twilights)
       
@@ -477,36 +491,93 @@ server <- function(input, output, session) {
   
   
   #############################
-  #### Edit twilights #########
+  #### 2.4 Edit twilights #####
   ##########################
   
-  output$twilightAll <- renderPlot({
-    
-      ts <- 3
-    
-      opar <- par(mar = c(3, 4, 3, 2))
-      
-      lightImage(raw_select(), offset = input$offset, zlim = c(0, 10), dt = 120)
-      tsimagePoints(twl()$Twilight, offset = input$offset, pch = 16, cex = 1.15,
-                    col = ifelse(twl()$Rise, "dodgerblue", "firebrick"))
-      tsimagePoints(twl()$Twilight[ts], offset = input$offset, pch = "x", cex = 1.15,
-                    col = "darkgrey")
-      par(opar)
-    
+  event   <- reactiveVal(1)
+  edit    <- reactiveValues(new = NULL, twilight = NULL, rise = NULL, key = NULL)
+  
+  observe({
+    if(!is.null(twl())) {
+      edit$twilight <- as.POSIXct(as.numeric(isolate(twl()$Twilight)), origin = "1970-01-01", tz = "GMT")
+      edit$rise     <- isolate(twl()$Rise)
+    }
   })
   
+  output$results = renderPrint({
+    edit$key
+  })
+  
+  observeEvent(input$trigger,{
+    
+    edit$key <- input$down
+    
+    if(!is.null(edit$new) && edit$key==65) {
+      
+      edit$twilight[event()] <- edit$new
+    
+      edit$key <- NULL
+      edit$new <- NULL
+      
+    } 
+  })
+  
+  observeEvent(twlEdit_slow(), {
+    edit$new <- as.POSIXct(as.numeric(twlEdit_slow()$x), origin = "1970-01-01", tz = "GMT")
+  })
+
+  
+  output$twilightAll <- renderPlot({
+
+      opar <- par(mar = c(3, 4, 3, 2))
+
+      lightImage(raw_select(), offset = input$offset, zlim = c(0, 10), dt = 120)
+      tsimagePoints(edit$twilight, offset = input$offset, pch = 16, cex = 1.15,
+                    col = ifelse(edit$rise, "dodgerblue", "firebrick"))
+      tsimagePoints(edit$twilight[event()], offset = input$offset, pch = "x", cex = 1.15,
+                    col = "darkgrey")
+      par(opar)
+
+  })
+
+
   output$selectedTwilight <- renderPlot({
     
-    ts <- 3
+    tsT <- raw_select()
+    ts0 <- tsT[tsT$Date >=  twl()$Twilight[event()]-12*60*60 &
+               tsT$Date <=  twl()$Twilight[event()]+12*60*60,]
+    ts1 <- tsT[tsT$Date >= (twl()$Twilight3[event()]-12*60*60)+24*60*60 &
+               tsT$Date <= (twl()$Twilight3[event()]+12*60*60)+24*60*60,]
+    ts2 <- tsT[tsT$Date >= (twl()$Twilight3[event()]-12*60*60)-24*60*60 &
+               tsT$Date <= (twl()$Twilight3[event()]+12*60*60)-24*60*60,]
+
+    twlT <- twl()
+    twl0 <- twlT[twlT$Twilight >= twlT$Twilight[event()]-12*60*60 &
+                 twlT$Twilight <= twlT$Twilight[event()]+12*60*60 &
+                 twlT$Rise     == twlT$Rise[event()],]
+
+    opar <- par(mar = c(3, 4, 3, 2), las = 1)
+    plot(ts0$Date, ts0$Light, type = "l", col = "black", lwd = 1.6, xlab = "Date", ylab = "Light")
+    par(new = T)
+    if(nrow(ts1)>1) plot(ts1$Date, ts1$Light, type = "l", col = adjustcolor("darkgreen", alpha.f = 0.7), lwd = 1.3, xlab = "", ylab = "", xaxt = "n", yaxt = "n")
+    par(new = T)
+    if(nrow(ts2)>1) plot(ts2$Date, ts2$Light, type = "l", col = adjustcolor("darkorchid2", alpha.f = 0.7), lwd = 1.3, xlab = "", ylab = "", xaxt = "n", yaxt = "n")
+
+    par(new = TRUE)
+    plot(ts0$Date, ts0$Light, type = "n", xlab = "", ylab = "", xaxt = "n", yaxt = "n")
+    abline(h = input$threshold, lty = 2, col = "grey20")
+    abline(v = edit$twilight[event()], col = "grey80", lwd = 1.5)
     
-    ts0 <- raw_select()[raw_select()$Date >= twl()$Twilight[ts]-12*60*60 & raw_select()$Date <= twl()$Twilight[ts]+12*60*60,]
-    
-    opar <- par(mar = c(3, 4, 3, 2))
-    plot(1,1)
-    plot(ts0$Date, ts0$Light, type = "l", col = "black")
+    if(!is.null(edit$new)) {
+      points(edit$new, input$threshold, pch = 16, cex = 1.8, col = "red")
+    } else points(edit$twilight[event()], input$threshold, pch = 16, cex = 1.8, col = "red")
+
     par(opar)
-    
+
   })
+  
+  twlEdit_slow <- debounce(reactive(input$new_edit), 300)
+  # keydown_slow <- debounce(reactive(input$down), 300)
   
 }
 
