@@ -5,9 +5,8 @@ account: slisovski
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 1144736
-bundleId: 2511317
+bundleId: 2511330
 url: https://slisovski.shinyapps.io/vwsgapp/
-when: 1571398800.87379
+when: 1571399234.58233
 asMultiple: FALSE
 asStatic: FALSE
-ignoredFiles: images/logo.jpg
