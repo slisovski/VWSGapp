@@ -6,6 +6,7 @@ library(SGAT)
 
 ui <- fluidPage(
   tags$head(
+    
   tags$style(HTML("
                     .col-sm-4 { width: 20%;}
                     .col-sm-8 { width: 80%;}
@@ -18,13 +19,7 @@ ui <- fluidPage(
                     "))
     
   ),
-  tags$script('
-              $(document).on("keydown", function (e) {
-              Shiny.onInputChange("down", [e.which]);
-              Shiny.onInputChange("trigger", Math.random());
-              });'
-  ),
-  
+
   navbarPage("VWSGapp", id = "navbar",
              
              ######################
