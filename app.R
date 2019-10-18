@@ -19,6 +19,13 @@ ui <- fluidPage(
                     "))
     
   ),
+  
+  tags$script('
+              $(document).on("keydown", function (e) {
+              Shiny.onInputChange("down", [e.which]);
+              Shiny.onInputChange("trigger", Math.random());
+              });'
+  ),
 
   navbarPage("VWSGapp", id = "navbar",
              
@@ -34,20 +41,14 @@ ui <- fluidPage(
                           
                           numericInput("lon.calib", 
                                        label = "Deployment longitude", 
-                                       value = NULL,    #default value
-                                       step = 0.00001), #"steps" with arrow buttons.
+                                       value = NULL,
+                                       step = 0.00001),
                           numericInput("lat.calib", 
                                        label = "Deployment latitude",  
                                        value = NULL,
                                        step = 0.00001),
                           hr(),
-                          
-                          radioButtons("filetype", 
-                                       label = "Select your filetype before browsing for your file",
-                                       choices = list(".lux",
-                                                      ".lig"
-                                       ),
-                                       selected = ".lux"),
+
                           fileInput("filename",
                                     label = "Browse for your file",
                                     accept = c(".lux",
@@ -66,6 +67,14 @@ ui <- fluidPage(
                           ),
                           
                           hr(),
+                          
+                          numericInput("threshold", 
+                                       label = h4("Threshold"), 
+                                       value = 1,
+                                       step  = 0.25),
+                          
+                          hr(),
+                          
                           actionButton("show1", "Help")
                         ),
                         
@@ -88,20 +97,17 @@ ui <- fluidPage(
                       
                       sidebarLayout(
                         sidebarPanel(
-                          numericInput("threshold", 
-                                       label = h4("Threshold"), 
-                                       value = 1,  #default value
-                                       step  = 0.25), #"steps" with arrow buttons.
-                          br(),
-                          
 
                           h4("1.Select range"),
-                          materialSwitch(
-                            inputId = "accept_range",
-                            label   = "accept", 
-                            status  = "primary",
-                            value   = FALSE,
-                            right   = TRUE
+                          conditionalPanel(
+                            condition = "input.accept_twl==false",
+                            materialSwitch(
+                              inputId = "accept_range",
+                              label   = "accept", 
+                              status  = "primary",
+                              value   = FALSE,
+                              right   = TRUE
+                              )
                           ),
                           
                           br(),
@@ -133,7 +139,6 @@ ui <- fluidPage(
                           actionButton("show2", "Help")
                         ),
                         mainPanel(
-                          verbatimTextOutput("twl_ready"),
                           conditionalPanel(
                             condition = "input.accept_range == false",
                                 uiOutput("selectRangePlot")
@@ -174,22 +179,29 @@ server <- function(input, output, session) {
   #### 1. Read Data ###########
   ##########################
   
+
+  
   raw <- reactive({
     
     req(input$filename)
     inFile <- input$filename
     
-    if (is.null(inFile)) {
+    filetype <- substr(input$filename$datapat, nchar(input$filename$datapat)-3, nchar(input$filename$datapat))    
+    
+    if(is.null(inFile)) {
       return(NULL)
-      } else
-    {
-      if (input$filetype == ".lig") {
-        return(NULL)
-      } else 
-      {
-        if (input$filetype == ".lux") {
+    } else {
+      if (filetype == ".lig") {
+        tab <- readLig(inFile$datapat)
+        
+        output$accept_range <- reactive(ncol(raw())>0)
+        outputOptions(output, c("accept_range"), suspendWhenHidden = FALSE)
+        
+        return(tab)
+      } else {
+        if (filetype == ".lux") {
           
-          tab <- readMTlux(inFile$datapath) #read the data into a dataframe called d.lig
+          tab <- readMTlux(inFile$datapath)
           tab$Light<-log(tab$Light)
           
           output$accept_range <- reactive(ncol(raw())>0)
@@ -197,7 +209,8 @@ server <- function(input, output, session) {
           
           return(tab)
           
-        } 
+        }
+      
       }
     }
    })
@@ -216,7 +229,7 @@ server <- function(input, output, session) {
   })
   
   observe({
-    if(!is.null(input$filename)) {
+    if(!is.null(raw())) {
       if(is.null(input$select_range_brush$xmin)) {
       min <- format(raw()$Date[1], "%Y-%m-%d")
       max <- format(raw()$Date[nrow(raw())], "%Y-%m-%d")
@@ -238,7 +251,7 @@ server <- function(input, output, session) {
   
   
   observe({
-    if(is.null(input$filename)) {
+    if(is.null(raw())) {
       selectedRange$min <- input$select_range_brush1$xmin
       selectedRange$max <- input$select_range_brush1$xmax
     }
@@ -264,7 +277,7 @@ server <- function(input, output, session) {
   
   output$lightImage0 <- renderPlot({
     
-    if(is.null(input$filename)) {
+    if(is.null(raw())) {
       plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
     } else { 
       
@@ -288,11 +301,11 @@ server <- function(input, output, session) {
   
   output$lightSeries <- renderPlot({
     
-    if(is.null(input$filename)) {
+    if(is.null(raw())) {
       plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
     } else {
       
-      if(!is.null(input$filename)) {
+      if(!is.null(raw())) {
         if(is.null(input$select_range_brush0$xmin)) {
           min <- format(raw()$Date[1], "%Y-%m-%d")
           max <- format(raw()$Date[nrow(raw())], "%Y-%m-%d")
@@ -310,7 +323,8 @@ server <- function(input, output, session) {
                as.POSIXct(raw()$Date) < as.POSIXct(max, format = "%Y-%m-%d")
       
       with(raw()[range,], plot(Date, Light, type = "o", pch = 16, cex = 0.25, xlab = "", ylab = "log light", las = 1,
-                               ylim = range(Light, na.rm = T)))
+                               ylim = c(0, max(raw()$Light, na.rm = T))))
+      abline(h = input$threshold, lty = 2, col = "orange")
     }
     
   })
@@ -325,16 +339,17 @@ server <- function(input, output, session) {
   observeEvent(input$show2, {
     showModal(modalDialog(
       title = "Twilight Annotation",
-      "This step allows the user to interactively search for and edit twilight times corresponding to a given light threshold. The process consists of three stages:
-       1) Subset – selection of a subset of the data for processing
-       2) Search – semi-automated search for the twilights
-       3) Edit – optioanlly, individual twilights are manually adjusted based on the light profiles.
-
+      HTML("This step allows the user to interactively search for and edit twilight times corresponding to a given light threshold. The process consists of three stages: <br>
+      <br>
+       1) Subset – selection of a subset of the data for processing<br>
+       2) Search – semi-automated search for the twilights<br>
+       3) Edit – optioanlly, individual twilights are manually adjusted based on the light profiles.<br>
+      <br>
       In the first stage the user can restrict the data to a subset for processing. The plot shows a light image ans the user can draw a rectangle to select the range. By choosing 'accept' the range will be applied.
       In the second step, the user needs to choose a datetime during the night by clicking into the night blob of the upper panel. If OK the sunrise (red) and sunset (blue) times (e.g. the twilight times) will appear in the lower panel. Several clicks might be nessesary to get all twiligths.
       After accepting this step, the user will get a light image with all identified, and a lower panel with the ligth recordings of the selected twilight (star in upper panel). The user may adjust individual twilights based on the observed light profile. 
       The light profile for that twilight in the second window, together with the profiles for the preceeding and following days. A left click in the second window proposes a new location for the current twilight, but no change is made until the edit is accepted with the 'a' key. 
-      Twiligth can also be deleted by pressing the 'd' key (undo by pressing'd' again.",
+      Twiligth can also be deleted by pressing the 'd' key (undo by pressing'd' again."),
       easyClose = TRUE
     ))
   })
@@ -416,12 +431,19 @@ server <- function(input, output, session) {
   ##########################
   
   nightClick <- reactiveValues(x=NULL, y=NULL)
-  
+  resetTwl   <- reactiveValues(accept = 0)
   
   observeEvent(nightSelect_slow(), {
     nightClick$x <- c(nightClick$x, nightSelect_slow()$x)
     nightClick$y <- c(nightClick$y, nightSelect_slow()$y)
     
+  })
+  
+  observeEvent(input$accept_twl, {
+    if(!input$accept_twl & resetTwl$accept>0) {
+      nightClick$x <- NULL
+      nightClick$y <- NULL
+    }
   })
   
   output$nightSelect <- renderPlot({
@@ -440,9 +462,10 @@ server <- function(input, output, session) {
 
   nightSelect_slow <- debounce(reactive(input$night_click), 300)
   
+  
   output$twilights <- renderPlot({
 
-    if(is.null(input$filename) | input$accept_range %% 2 != 0) {
+    if(is.null(input$filename) | input$accept_range) {
 
       opar <- par(mar = c(3, 4, 3, 2))
       lightImage(raw_select(), offset = input$offset, zlim = c(0, 10), dt = 120)
@@ -485,7 +508,16 @@ server <- function(input, output, session) {
     }
   })
   
-
+  
+  observeEvent(input$accept_twl, {
+    resetTwl$accept <- resetTwl$accept + 1
+    output$accept <- renderText({resetTwl$accept})
+  })
+  
+  observeEvent(input$accept_range, {
+    resetTwl$accept <- 0
+  })
+  
   twl <- reactive({
 
     if(any(!is.null(nightClick$x))) {
@@ -517,16 +549,13 @@ server <- function(input, output, session) {
     }
   })
 
-  observeEvent(input$accept_twl, {
-    output$Step4 <- reactive(input$accept_twl %% 2 != 0)
-    outputOptions(output, c("Step4"), suspendWhenHidden = FALSE)
-  })
 
   observe({
     if(!is.null(input$select_ts)) {
     edit$event <- which.min(abs(edit$twilight - as.POSIXct(as.numeric(input$select_ts$x), origin = "1970-01-01", tz = "GMT")))
     }
   })
+  
 
   observeEvent(input$trigger,{
     edit$key <- input$down
@@ -628,6 +657,7 @@ server <- function(input, output, session) {
   #     return(tab)
   #   }
   # })
+  
   
 }
 
