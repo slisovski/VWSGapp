@@ -1,8 +1,10 @@
 library(shiny)
 library(markdown)
 library(shinyWidgets)
+library(MASS)
 library(TwGeos)
 library(SGAT)
+library(leaflet)
 
 ui <- fluidPage(
   tags$head(
@@ -39,11 +41,11 @@ ui <- fluidPage(
                       sidebarLayout(
                         sidebarPanel(
                           
-                          numericInput("lon.calib", 
+                          numericInput("lon.calib0", 
                                        label = "Deployment longitude", 
                                        value = NULL,
                                        step = 0.00001),
-                          numericInput("lat.calib", 
+                          numericInput("lat.calib0", 
                                        label = "Deployment latitude",  
                                        value = NULL,
                                        step = 0.00001),
@@ -112,9 +114,9 @@ ui <- fluidPage(
                           
                           br(),
                           
+                          h4("2. Twilight selection"),
                           conditionalPanel(
                             condition = "input.accept_range & input.accept_edits == false",
-                            h4("2. Twilight selection"),
                             materialSwitch(
                               inputId = "accept_twl",
                               label   = "accept", 
@@ -126,9 +128,9 @@ ui <- fluidPage(
 
                           br(),
                           
+                          h4("3. Twilight edit"),
                           conditionalPanel(
                             condition = "input.accept_twl",
-                            h4("3. Twilight edit"),
                             materialSwitch(
                               inputId = "accept_edits",
                               label   = "accept", 
@@ -174,10 +176,85 @@ ui <- fluidPage(
             
              ######################
              ##### 3. Calibration #
+             ###################
+             tabPanel("Calibration",
+                      
+                      sidebarLayout(
+                        sidebarPanel(
+                          
+                          numericInput("lon.calib", 
+                                       label = "Calibration longitude", 
+                                       value = NULL,
+                                       step = 0.00001),
+                          numericInput("lat.calib", 
+                                       label = "Calibration latitude",  
+                                       value = NULL,
+                                       step = 0.00001),
+                          hr(),
+                          
+                          h4("1.Select calibration period(s)"),
+                          
+                          conditionalPanel(
+                            condition = "input.accept_twl",
+                            fluidRow(column(width=8, verbatimTextOutput("calib_range1")),
+                                     column(width=2, materialSwitch(
+                                       inputId = "lock_calib1",
+                                       label   = "", 
+                                       status  = "success",
+                                       value   = FALSE,
+                                       right   = TRUE
+                                     ))),
+                            fluidRow(column(width=8, verbatimTextOutput("calib_range2")),
+                                     column(width=2, materialSwitch(
+                                       inputId = "lock_calib2",
+                                       label   = "", 
+                                       status  = "success",
+                                       value   = FALSE,
+                                       right   = TRUE
+                                     ))),
+                          
+                            hr(),
+                            
+                            pickerInput(
+                              inputId = "CalibMethod",
+                              label = "Calibration Method", 
+                              choices = c("log-norm", "gamma"),
+                              selected = "gamma"
+                            ),
+                            
+                            fluidRow(column(width=5, verbatimTextOutput("z1")),
+                                     column(width=5, h5("zenith"))),
+                            fluidRow(column(width=5, verbatimTextOutput("z0")),
+                                     column(width=5, h5("TwModel 1"))),
+                            fluidRow(column(width=5, verbatimTextOutput("shape")),
+                                     column(width=5, h5("TwModel 2"))),
+                            fluidRow(column(width=5, verbatimTextOutput("rate")),
+                                     column(width=5, h5("TwModel 3"))),
+                                  
+                          hr()
+                          ),
+                          
+                          actionButton("show3", "Help")
+                          
+                        ),
+                        mainPanel(
+                          conditionalPanel(
+                            condition = "input.accept_twl == true",
+                            plotOutput("twilightCalib", height = 200),
+                            fluidRow(align="center", uiOutput("calibSlider1")),
+                            fluidRow(align="center", uiOutput("calibSlider2")),
+                            fluidRow(align="center", plotOutput("calibration", width = 550))
+                          )
+                        )
+                      )
+             ),
              ######################
-            
-             tabPanel("Calibration"),
-             tabPanel("Location estimates"),
+             ##### 4. Locations ###
+             ###################
+             tabPanel("Location estimates",
+                      leafletOutput("map", width = "100%", height = 750)
+             ),
+             #####
              tabPanel("Breeding site"),
              tabPanel("Breeding performance")
             
@@ -190,9 +267,7 @@ server <- function(input, output, session) {
   #############################
   #### 1. Read Data ###########
   ##########################
-  
 
-  
   raw <- reactive({
     
     req(input$filename)
@@ -268,7 +343,7 @@ server <- function(input, output, session) {
       selectedRange$max <- input$select_range_brush1$xmax
     }
     
-    output$Deployment <- reactive(!is.null(input$filename) & all(!is.na(c(input$lon.calib, input$lat.calib))))
+    output$Deployment <- reactive(!is.null(input$filename) & all(!is.na(c(input$lon.calib0, input$lat.calib0))))
     outputOptions(output, c("Deployment"), suspendWhenHidden = FALSE)
     
     if(input$deployment_line %% 2 == 0) {
@@ -296,8 +371,8 @@ server <- function(input, output, session) {
       lightImage(raw(), offset = input$offset, zlim = c(0, 10), dt = 120)
       mtext("Draw rectangle to inspect period of light recordings", cex = 1.5, line = 3)
       
-      if(input$deployment_line %% 2 == 0 & all(!is.na(c(input$lon.calib, input$lat.calib)))) {
-        tsimageDeploymentLines(raw()$Date, input$lon.calib, input$lat.calib, offset = input$offset,
+      if(input$deployment_line %% 2 == 0 & all(!is.na(c(input$lon.calib0, input$lat.calib0)))) {
+        tsimageDeploymentLines(raw()$Date, input$lon.calib0, input$lat.calib0, offset = input$offset,
                                lwd = 4, col = adjustcolor("orange", alpha.f = 0.6))
       }
     }
@@ -367,23 +442,14 @@ server <- function(input, output, session) {
   })
   
   selectedRange <- reactiveValues(min = NULL, max = NULL)
-  output$test   <- renderText({input$select_range_brush1$xmin})
-  
+
   observe({
-    
     if(!is.null(input$select_range_brush1)) {
       selectedRange$min <- input$select_range_brush1$xmin
       selectedRange$max <- input$select_range_brush1$xmax
     }
-    
-    # if(!is.null(input$select_range_brush1) & !input$accept_range) {
-    #   selectedRange$min <- NULL
-    #   selectedRange$max <- NULL
-    # }
-    
   })
 
-  
   output$lightImage1 <- renderPlot({
     
     if(is.null(input$filename) ) {
@@ -645,7 +711,6 @@ server <- function(input, output, session) {
 
     twlEdit_slow <- debounce(reactive(input$new_edit), 300)
 
-
     twl_final <- reactive({
       
       if(input$accept_edits) {
@@ -665,18 +730,228 @@ server <- function(input, output, session) {
     
     output$downloadTwl <- downloadHandler(
       filename = function() {
-        paste("ID.csv", sep = "")
+        paste(substr(input$filename$datapat, 1, nchar(input$filename$datapat)-3), "_twl.csv", sep = "")
       },
       content = function(file) {
         write.csv(twl_final(), file, row.names = FALSE)
       }
     )
+    
+  #############################
+  #### 3.1 Calibration ########
+  #########################
+
+  observeEvent(input$show3, {
+      showModal(modalDialog(
+        title = "Calibration",
+        HTML("TBA"),
+        easyClose = TRUE
+      ))
+  })
+    
+  observeEvent(input$lon.calib0, {
+    updateNumericInput(session, "lon.calib", value = input$lon.calib0)
+  })
+  observeEvent(input$lat.calib0, {
+    updateNumericInput(session, "lat.calib", value = input$lat.calib0)
+  })
+
+  selectedCalibRange1 <- reactiveValues(min = NULL, max = NULL)
+  selectedCalibRange2 <- reactiveValues(min = NULL, max = NULL)  
+
+  observe({
+    if(input$lock_calib1) {
+      selectedCalibRange1$min <- input$calibRange1[1]
+      selectedCalibRange1$max <- input$calibRange1[2]
+      output$calib_range1     <- renderText({paste0(format(selectedCalibRange1$min, "%Y/%m/%d"), " - ", format(selectedCalibRange1$max, "%Y/%m/%d"))})
+    } else {
+      selectedCalibRange1$min <- NULL
+      selectedCalibRange1$max <- NULL
+      output$calib_range1      <- renderText({"not active"})
+    }
+    
+    if(input$lock_calib2) {
+      selectedCalibRange2$min <- input$calibRange2[1]
+      selectedCalibRange2$max <- input$calibRange2[2]
+      output$calib_range2      <- renderText({paste0(format(selectedCalibRange2$min, "%Y/%m/%d"), " - ", format(selectedCalibRange2$max, "%Y/%m/%d"))})
+    } else {
+      selectedCalibRange2$min <- NULL
+      selectedCalibRange2$max <- NULL
+      output$calib_range2      <- renderText({"not active"})
+    }
+    
+  })
   
+  output$calibSlider1 <- renderUI({
+    sliderInput("calibRange1", "",
+                min = min(twl_final()$Twilight, na.rm = TRUE),
+                max = max(twl_final()$Twilight, na.rm = TRUE),
+                value = range(twl_final()$Twilight, na.rm = TRUE),
+                ticks = FALSE,
+                timeFormat = "%F",
+                width = '96%')
+  })
   
-}
+  output$calibSlider2 <- renderUI({
+    sliderInput("calibRange2", "",
+                min = min(twl_final()$Twilight, na.rm = TRUE),
+                max = max(twl_final()$Twilight, na.rm = TRUE),
+                value = range(twl_final()$Twilight, na.rm = TRUE),
+                ticks = FALSE,
+                timeFormat = "%F",
+                width = '96%')
+  })
+  
+  output$twilightCalib <- renderPlot({
+    
+    opar <- par(mar = c(0, 0, 0, 0))
+    
+    lightImage(raw_select(), offset = input$offset, zlim = c(0, 10), dt = 120, xaxt = "n", yaxt = "n")
+    tsimageDeploymentLines(raw_select()$Date, input$lon.calib, input$lat.calib, offset = input$offset,
+                           lwd = 4, col = adjustcolor("orange", alpha.f = 0.6))
+    tsimagePoints(twl_final()$Twilight, offset = input$offset, pch = 16, cex = 1.2,
+                  col = ifelse(twl_final()$Deleted, "grey40", ifelse(twl_final()$Rise, "dodgerblue", "firebrick")))
+    
+    if(input$lock_calib1) {
+      rect(as.numeric(selectedCalibRange1$min), -25, as.numeric(selectedCalibRange1$max), 25, border = NA, col = adjustcolor("orange", alpha.f = 0.25))
+    }
+    if(input$lock_calib2) {
+      rect(as.numeric(selectedCalibRange2$min), -25, as.numeric(selectedCalibRange2$max), 25, border = NA, col = adjustcolor("orange", alpha.f = 0.25))
+    }
+    
+    par(opar)
+    
+  })
+  
+  calib_twl <- reactive({
+  
+    if(any(c(input$lock_calib1, input$lock_calib2))) {
+      
+    if(input$lock_calib1 & !input$lock_calib2) {
+      tab <- subset(twl_final(), Twilight>=selectedCalibRange1$min & Twilight<=selectedCalibRange1$max)
+    }
+    if(!input$lock_calib1 & input$lock_calib2) {
+      tab <- subset(twl_final(), Twilight>=selectedCalibRange2$min & Twilight<=selectedCalibRange2$max)
+    }
+    if(input$lock_calib1 & input$lock_calib2) {
+      tab <- subset(twl_final(), (Twilight>=selectedCalibRange1$min & Twilight<=selectedCalibRange1$max) |
+                                 (Twilight>=selectedCalibRange2$min & Twilight<=selectedCalibRange2$max))
+    }
+      return(tab)
+    } else return(NULL)
+
+  })
+  
+  calibTab <- reactive({
+    
+    if(!is.null(calib_twl())) {
+    
+    tab <- data.frame(Twilight = calib_twl()$Twilight, Rise = calib_twl()$Rise)
+    sun <- solar(tab[, 1])
+    z <- refracted(zenith(sun, input$lon.calib, input$lat.calib))
+    
+    inc = 0
+    
+    repeat {
+      twl_t <- twilight(tab[, 1], input$lon.calib, input$lat.calib, rise = tab[, 2], zenith = max(z) + inc)
+      twl_dev <- ifelse(tab$Rise, as.numeric(difftime(tab[, 1], twl_t, units = "mins")), as.numeric(difftime(twl_t, tab[, 1], units = "mins")))
+      if (all(twl_dev >= 0) | inc>2) break  else inc <- inc + 0.01
+    }
+    
+        if(all(twl_dev>=0 & twl_dev<5*60)) {
+        z0 <- max(z) + inc
+        seq <- seq(0, max(twl_dev), length = 100)
+        if (input$CalibMethod == "log-norm") {
+          fitml_ng <- suppressWarnings(fitdistr(twl_dev, "log-normal"))
+          lns <- dlnorm(seq, fitml_ng$estimate[1], fitml_ng$estimate[2])
+        }
+        if(input$CalibMethod== "gamma") {
+          fitml_ng <- suppressWarnings(fitdistr(twl_dev, "gamma"))
+          lns <- dgamma(seq, fitml_ng$estimate[1], fitml_ng$estimate[2])
+        }
+        
+        z1 <- median(z)
+        
+        return(list(twlDev = twl_dev, z = z, method = input$CalibMethod, z1 = z1, z0 = z0, shape = fitml_ng$estimate[1], rate = fitml_ng$estimate[2]))
+        } else return(NULL)
+    } else return(NULL)
+  })
+  
+  output$calibration <- renderPlot({
+    
+    if(!is.null(calibTab()) & !is.null(input$lon.calib) & !is.null(input$lat.calib)) {
+      
+      
+      opar <- par(mar = c(4, 4, 1, 1))
+      hist(calibTab()$twlDev, freq = F, breaks = 26, main = "", xlab = "twilight error (min)", col = "grey85")
+      
+      seq <- seq(0, max(calibTab()$twlDev), length = 100)
+      if(input$CalibMethod== "gamma") {
+        lines(seq, dgamma(seq, calibTab()$shape, calibTab()$rate), col = "firebrick", lwd = 3, lty = 2)
+      } else {
+        lines(seq, dlnorm(seq, calibTab()$shape, calibTab()$rate), col = "firebrick", lwd = 3, lty = 2)
+      }
+      
+      diffz <- as.data.frame(cbind(min = apply(cbind(calib_twl()$Twilight,
+                            twilight(calib_twl()$Twilight, input$lon.calib, input$lat.calib, rise = calib_twl()$Rise, zenith = calibTab()$z0)), 1,
+                            function(x) abs(x[1] - x[2]))/60, z = calibTab()$z))
+      mod <- lm(min ~ z, data = diffz)
+
+      points(predict(mod, newdata = data.frame(z = calibTab()$z0)), 0,
+                     pch = 21, cex = 5, bg = "white", lwd = 2, xpd = TRUE)
+      text(predict(mod, newdata = data.frame(z = calibTab()$z0)), 0, "z0")
+
+      points(predict(mod, newdata = data.frame(z = calibTab()$z1)), 0,
+             pch = 21, cex = 5, bg = "white", lwd = 2, xpd = TRUE)
+      text(predict(mod, newdata = data.frame(z = calibTab()$z1)), 0, "z1")
+
+      par(opar)
+      
+    } else plot(1,1, xaxt = "n", yaxt = "n", type = "n", bty = "n", xlab = "", ylab = "")
+    
+  })
+  
+  output$z0    <- renderText({ifelse(!is.null(calibTab()), calibTab()$z0, "not defined")})
+  output$z1    <- renderText({ifelse(!is.null(calibTab()), calibTab()$z1, "not defined")})
+  output$shape <- renderText({ifelse(!is.null(calibTab()), calibTab()$shape, "not defined")})
+  output$rate  <- renderText({ifelse(!is.null(calibTab()), calibTab()$rate, "not defined")})
+    
+
+  #############################
+  #### 4. Locations ###########
+  #######################
+  
+  coords <- reactive({
+    if(!is.null(calibTab())) {
+      tab <- with(twl_final()[!twl_final()$Deleted, ], thresholdLocation(Twilight, Rise, zenith = calibTab()$z1)$x)
+      return(tab)
+    } else {
+      return(NULL)
+    }
+  })
+
+
+  output$map <- renderLeaflet({
+
+    if(is.null(coords())) {
+      leaflet() %>%
+      addProviderTiles(providers$Esri.WorldGrayCanvas,
+                       options = providerTileOptions(noWrap = FALSE)
+                       
+      ) 
+      } else {
+         leaflet() %>%
+           addProviderTiles(providers$Esri.WorldGrayCanvas,
+                           options = providerTileOptions(noWrap = FALSE)
+          ) %>%
+          addPolylines(data = coords()[!is.nan(coords()[,2]),], color = adjustcolor("orange", alpha.f = 0.75), weight = 4, ) %>%
+          addCircleMarkers(data = coords()[!is.nan(coords()[,2]),], color = "orange", weight = 1)
+      }
+  })
+  
+  }
 
 
 
 # Run the application 
 shinyApp(ui = ui, server = server)
-
