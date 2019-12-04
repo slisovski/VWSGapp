@@ -66,7 +66,7 @@ ui <- fluidPage(
                         ),
                         column(6,
                                conditionalPanel(
-                                 condition = "input.loggerID != ''",
+                                 condition = "output.fromFile == true",
                                  actionButton("toAnalysis", "Create Project")
                                )
                         )
@@ -95,11 +95,13 @@ ui <- fluidPage(
                           hr(),
                           
                           textOutput("rawLight"),
-                          
-                          fileInput("filename",
-                                    label = "Browse for your file",
-                                    accept = c(".lux",
-                                               ".lig")
+                          conditionalPanel(
+                                condition = "output.rawTab == true",
+                                fileInput("filename",
+                                          label = "Browse for your file",
+                                          accept = c(".lux",
+                                                     ".lig")
+                                )
                           ),
                           numericInput("offset", 
                                        label = "Offset", 
@@ -122,6 +124,10 @@ ui <- fluidPage(
                           
                           hr(),
                           
+                          downloadButton("savePrj", "Save project"),
+                          
+                          hr(),
+                          
                           actionButton("show1", "Help")
                         ),
                         
@@ -141,7 +147,7 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   
-  output <- reactiveValues(acceptS4 = FALSE)
+  ind    <- reactiveValues(acceptS4 = FALSE, rawTab = FALSE, twlTab = FALSE)
   dat    <- reactiveValues(resOut = NULL)
   
   observe({
@@ -150,6 +156,10 @@ server <- function(input, output, session) {
     } else {
       showTab(inputId = "navbar", target = "Light data")
     }
+    
+    output$fromFile <- reactive(input$loggerID != "" & !ind$acceptS4)
+    outputOptions(output, c("fromFile"), suspendWhenHidden = FALSE)
+    
   })
   
   observeEvent(input$projectFile, {
@@ -163,13 +173,13 @@ server <- function(input, output, session) {
             )
     } else {
       updateTextInput(session, "loggerID", value = env()[[names(env())[1]]]@ID)
-      output$acceptS4 <- TRUE
+      ind$acceptS4 <- TRUE
     }
   })
 
   
   resOut <- reactive({
-    if(output$acceptS4) {
+    if(ind$acceptS4) {
       outS01 <- reactiveFileReader(1000, session, input$projectFile$datapath, LoadToEnvironment)
       outS1  <- outS01()[[names(outS01())[1]]]
       return(outS1)
@@ -187,6 +197,12 @@ server <- function(input, output, session) {
   
   observe({
     dat$resOut <- resOut()
+    
+    if(!is.null(dat$resOut)) {
+      output$rawTab   <- reactive(nrow(dat$resOut@Raw)==0)
+      outputOptions(output, c("rawTab"), suspendWhenHidden = FALSE)
+    }
+    
   })
   
   
@@ -202,10 +218,10 @@ server <- function(input, output, session) {
     }
     if(!is.null(dat$resOut@Mdata$offset)) {
       updateNumericInput(session, "Offset", value = dat$resOut@Mdata$offset)
-    } 
+    }
     if(!is.null(dat$resOut@Mdata$threshold)) {
       updateNumericInput(session, "threshold", value = dat$resOut@Mdata$threshold)
-    } 
+    }
     }
   })
   
@@ -213,12 +229,21 @@ server <- function(input, output, session) {
     if(!is.null(dat$resOut)) {
     dat$resOut@Mdata$offset <- input$offset
     }})
-  
+
   observeEvent(input$threshold, {
     if(!is.null(dat$resOut)) {
       dat$resOut@Mdata$threshold <- input$threshold
     }})
     
+  
+  output$savePrj <- downloadHandler(
+    filename = function() {
+      paste(input$loggerID, "_", Sys.Date(), ".RData", sep="")
+    },
+    content = function(file) {
+      save(dat$resOut, file = file)
+    }
+  )
 
   
   
