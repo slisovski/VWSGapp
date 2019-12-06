@@ -5,13 +5,17 @@ library(MASS)
 library(TwGeos)
 library(SGAT)
 library(leaflet)
+library(shinycssloaders)
+# library(dygraphs)
 
 setClass(
-  "VWSGapp",
-  slots = c(ID       = "character",
-            Mdata    = "list", 
-            Raw      = "data.frame",
-            Twl      = "data.frame")
+  "GeolocApp",
+  slots = c(ID        = "character",
+            Mdata     = "list", 
+            Raw       = "data.frame",
+            Twl       = "data.frame",
+            Calib     = "list",
+            Locations = "data.frame")
 )
 
 LoadToEnvironment <- function(RData, env=new.env()) {
@@ -41,12 +45,12 @@ ui <- fluidPage(
               });'
   ),
 
-  navbarPage("VWSGapp", id = "navbar",
+  navbarPage("GeolocApp", id = "navbar",
 
              ########################
-             ##### 1. Load Project ##
+             ##### 0. Start page ####
              #####################
-             tabPanel("StartPage",
+             tabPanel("Start page",
                       
                       fluidRow(
                         column(3,
@@ -101,6 +105,11 @@ ui <- fluidPage(
                                                      ".lig")
                                 )
                           ),
+                          
+                          checkboxInput("MaxValues", label = "Max. Light", value = TRUE),
+
+                          br(),
+                          
                           numericInput("offset", 
                                        label = "Offset", 
                                        value = 1,  #default value
@@ -131,8 +140,8 @@ ui <- fluidPage(
                         ),
                         
                         mainPanel(
-                          uiOutput("selectLightSeries"),
-                          plotOutput("lightSeries")
+                          withSpinner(uiOutput("selectLightSeries")),
+                          withSpinner(plotOutput("lightSeries"))
                         )
                         
                       ) ## end Sidebar Panel
@@ -154,7 +163,7 @@ ui <- fluidPage(
                             condition = "input.accept_twl==false",
                             materialSwitch(
                               inputId = "accept_range",
-                              label   = "accept", 
+                              label   = "", 
                               status  = "primary",
                               value   = FALSE,
                               right   = TRUE
@@ -168,7 +177,7 @@ ui <- fluidPage(
                             condition = "input.accept_range & input.accept_edits == false",
                             materialSwitch(
                               inputId = "accept_twl",
-                              label   = "accept", 
+                              label   = "", 
                               status  = "primary",
                               value   = FALSE,
                               right   = TRUE
@@ -182,7 +191,7 @@ ui <- fluidPage(
                             condition = "input.accept_twl",
                             materialSwitch(
                               inputId = "accept_edits",
-                              label   = "accept", 
+                              label   = "", 
                               status  = "primary",
                               value   = FALSE,
                               right   = TRUE
@@ -193,7 +202,7 @@ ui <- fluidPage(
                           
                           conditionalPanel(
                             condition = "input.accept_edits",
-                            downloadButton("downloadTwl", "Download twl.csv")
+                            downloadButton("downloadTwl", "Save twl.csv")
                           ),
                           
                           br(),
@@ -208,13 +217,13 @@ ui <- fluidPage(
                         mainPanel(
                           conditionalPanel(
                             condition = "input.accept_range == false",
-                            uiOutput("selectRangePlot")
+                            withSpinner(uiOutput("selectRangePlot"))
                           ),
                           conditionalPanel(
                             condition = "input.accept_range == true & input.accept_twl == false",
                             plotOutput("nightSelect", height=400,
                                        click = clickOpts(id = "night_click")),
-                            plotOutput("twilights", height=400)
+                            withSpinner(plotOutput("twilights", height=400))
                           )
                           ,
                           conditionalPanel(
@@ -225,8 +234,84 @@ ui <- fluidPage(
                           )
                         )
                       )
-             ) ## tabPanel (Twilight)
+             ), ## tabPanel (Twilight)
              
+             
+             ########################
+             ##### 3. Calibration ###
+             #####################
+             tabPanel("Calibration",
+                      
+                      sidebarLayout(
+                        sidebarPanel(
+                          
+                          h5("Calibration longitude:"),
+                          textOutput("lonC"),
+                          h5("Calibration latitude:"),
+                          textOutput("latC"),
+                          
+                          hr(),
+                          
+                          h4("1.Select calibration period(s)"),
+                          
+                          conditionalPanel(
+                            condition = "input.accept_twl",
+                            fluidRow(column(width=8, verbatimTextOutput("calib_range1")),
+                                     column(width=2, materialSwitch(
+                                       inputId = "lock_calib1",
+                                       label   = "", 
+                                       status  = "success",
+                                       value   = FALSE,
+                                       right   = TRUE
+                                     ))),
+                            fluidRow(column(width=8, verbatimTextOutput("calib_range2")),
+                                     column(width=2, materialSwitch(
+                                       inputId = "lock_calib2",
+                                       label   = "", 
+                                       status  = "success",
+                                       value   = FALSE,
+                                       right   = TRUE
+                                     ))),
+                            
+                            hr(),
+                            
+                            pickerInput(
+                              inputId = "CalibMethod",
+                              label = "Calibration Method", 
+                              choices = c("log-norm", "gamma"),
+                              selected = "gamma"
+                            ),
+                            
+                            fluidRow(column(width=5, verbatimTextOutput("z1")),
+                                     column(width=5, h5("zenith"))),
+                            fluidRow(column(width=5, verbatimTextOutput("z0")),
+                                     column(width=5, h5("TwModel 1"))),
+                            fluidRow(column(width=5, verbatimTextOutput("shape")),
+                                     column(width=5, h5("TwModel 2"))),
+                            fluidRow(column(width=5, verbatimTextOutput("rate")),
+                                     column(width=5, h5("TwModel 3"))),
+                            
+                            hr()
+                          ),
+                          
+                          downloadButton("savePrj3", "Save project"),
+                          
+                          hr(),
+                          
+                          actionButton("show3", "Help")
+                          
+                        ),
+                        mainPanel(
+                          conditionalPanel(
+                            condition = "input.accept_twl == true",
+                            withSpinner(plotOutput("twilightCalib", height = 200)),
+                            fluidRow(align="center", uiOutput("calibSlider1")),
+                            fluidRow(align="center", uiOutput("calibSlider2")),
+                            fluidRow(align="center", plotOutput("calibration", width = 550))
+                          )
+                        )
+                      )
+             )
              
              #### ----
              
@@ -241,11 +326,18 @@ server <- function(input, output, session) {
   dat    <- reactiveValues(ID = NULL,
                            Mdata = list(lon.calib = NULL,
                                         lat.calib = NULL,
+                                        max       = FALSE,
                                         offset    = NULL,
                                         threshold = NULL,
                                         range     = NULL),
                            Raw = data.frame(),
-                           Twl = data.frame())
+                           Twl = data.frame(),
+                           Calib = list(twl.calib = data.frame(),
+                                        zenith    = NULL,
+                                        zenith0   = NULL,
+                                        alpha     = NULL,
+                                        model     = NULL),
+                           Locations = data.frame())
   
   observe({
     if(nrow(dat$Raw)==0) {
@@ -253,6 +345,19 @@ server <- function(input, output, session) {
     } else {
       showTab(inputId = "navbar", target = "Twilight")
     }
+    
+    if(!ind$acceptS4) {
+      hideTab(inputId = "navbar", target = "Light data")
+    } else {
+      showTab(inputId = "navbar", target = "Light data")
+    }
+    
+    if(!input$accept_edits) {
+      hideTab(inputId = "navbar", target = "Calibration")
+    } else {
+      showTab(inputId = "navbar", target = "Calibration")
+    }
+    
   })
   
 
@@ -274,6 +379,15 @@ server <- function(input, output, session) {
   }
   )
   
+  output$savePrj3 <- downloadHandler(
+    filename = function() {
+      paste(dat$ID, "_", Sys.Date(), ".RData", sep="")
+    },
+    content = function(file) {
+      saveRDS(s4(), file = file)
+    }
+  )
+  
   #############################
   #### 0. Create Project ######
   ##########################
@@ -287,12 +401,6 @@ server <- function(input, output, session) {
   })
   
   observe({
-    if(!ind$acceptS4) {
-      hideTab(inputId = "navbar", target = "Light data")
-    } else {
-      showTab(inputId = "navbar", target = "Light data")
-    }
-    
     output$fromFile <- reactive((input$loggerID != "" & !ind$acceptS4) | (input$loggerID != "" & input$toAnalysis %% 2 > 0))
     outputOptions(output, c("fromFile"), suspendWhenHidden = FALSE)
   })
@@ -300,11 +408,11 @@ server <- function(input, output, session) {
   
   observeEvent(input$projectFile, {
     env <- readRDS(input$projectFile$datapath)
-    if(class(env) != "VWSGapp") {
+    if(class(env) != "GeolocApp") {
       sendSweetAlert(
               session = session,
               title = "Error",
-              text = "Loaded file is not a VWSGapp project.",
+              text = "Loaded file is not a GeolocApp project.",
               type = "error"
             )
     } else {
@@ -320,50 +428,57 @@ server <- function(input, output, session) {
         dat$Mdata$lat.calib <- env@Mdata$lat.calib
         updateNumericInput(session, "lat.calib0",  value = dat$Mdata$lat.calib)
       }
+      
+      if(!is.null(env@Mdata$max)) {
+        dat$Mdata$max <- env@Mdata$max
+        updateCheckboxInput(session, "MaxValues",  value = dat$Mdata$max)
+      }
 
-      if(!is.null(env@Mdata$offset))    {
+      if(!is.null(env@Mdata$offset)) {
         dat$Mdata$offset <- env@Mdata$offset
         updateNumericInput(session, "Offset",  value = dat$Mdata$offset)
       }
 
-      if(!is.null(env@Mdata$threshold))    {
+      if(!is.null(env@Mdata$threshold)) {
         dat$Mdata$threshold <- env@Mdata$threshold
         updateNumericInput(session, "threshold",  value = dat$Mdata$threshold)
       }
       
-      if(!is.null(env@Mdata$range))    {
-        
+      if(!is.null(env@Mdata$range)) {
         dat$Mdata$range <- env@Mdata$range
-        
         updateMaterialSwitch(session, "accept_range",
                              value = TRUE)
-        updateActionButton(session, "accept_range",
-                           label = "reset")
       }
 
-      if(nrow(env@Raw)>0) {
-        dat$Raw <- env@Raw } else {data.frame()}
+      if(nrow(env@Raw)>0) dat$Raw <- env@Raw
+      
       if(nrow(env@Twl)>0) {
         
         dat$Twl <- env@Twl 
         
         updateMaterialSwitch(session, "accept_twl",
                              value = TRUE)
-        updateActionButton(session, "accept_twl",
-                           label = "reset")
-        
         updateMaterialSwitch(session, "accept_edits",
                              value = TRUE)
-        updateActionButton(session, "accept_edits",
-                           label = "reset")
-        
-        } else {data.frame()}
 
-      updateTextInput(session, "loggerID", value = env@ID)
-      ind$acceptS4 <- TRUE
+        updateTextInput(session, "loggerID", value = env@ID)
+        ind$acceptS4 <- TRUE
 
-      output$fromFile  <- reactive(TRUE)
-      outputOptions(output, "fromFile", suspendWhenHidden = FALSE)
+        output$fromFile  <- reactive(TRUE)
+        outputOptions(output, "fromFile", suspendWhenHidden = FALSE)
+    }
+    
+      
+    if(nrow(env@Calib$twl.calib)>0) {
+      dat$Calib <- env@Calib
+    }
+    
+    updateTextInput(session, "loggerID", value = env@ID)
+    ind$acceptS4 <- TRUE
+    
+    output$fromFile  <- reactive(TRUE)
+    outputOptions(output, "fromFile", suspendWhenHidden = FALSE)
+    
     }
   })
   
@@ -379,6 +494,9 @@ server <- function(input, output, session) {
   })
   observeEvent(input$lat.calib0, {
     dat$Mdata$lat.calib <- input$lat.calib0
+  })
+  observeEvent(input$MaxValues, {
+    dat$Mdata$max <- input$MaxValues
   })
 
   #############################
@@ -573,8 +691,6 @@ server <- function(input, output, session) {
   
   observe({
     if(input$accept_range & is.null(dat$Mdata$range)) {
-      updateActionButton(session, "accept_range",
-                         label = "reset")
       
         min   <- format(as.POSIXct(selectedRange$min, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
         max   <- format(as.POSIXct(selectedRange$max, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
@@ -584,16 +700,6 @@ server <- function(input, output, session) {
     }
   })
   
-  observeEvent(input$accept_range, {
-    if(!input$accept_range & !is.null(dat$Mdata$range)) {
-      updateActionButton(session, "accept_range",
-                         label = "no range selected")
-    } else {
-      updateActionButton(session, "accept_range",
-                         label = "reset")
-    }
-    
-  })
   
   #############################
   #### 2.3 Find twilights #####
@@ -670,8 +776,6 @@ server <- function(input, output, session) {
   
   observe({
     if(input$accept_twl & nrow(dat$Twl)==0) {
-      updateActionButton(session, "accept_twl",
-                         label = "reset")
 
       seed                <- as.POSIXct(format(as.POSIXct(as.numeric(nightClick$x[!is.null(nightClick$x)]),
                                                           origin = "1970-01-01", t = "GMT"), "%Y-%m-%d"), tz = "GMT") +
@@ -685,16 +789,7 @@ server <- function(input, output, session) {
 
       dat$Twl <- twilights
 
-    } else {
-      if(all(is.null(nightClick$x))) {
-        updateActionButton(session, "accept_twl",
-                           label = "no twilights selected")
-      } else {
-        updateActionButton(session, "accept_twl",
-                           label = "accept")
-      }
     }
-
   })
 
   observeEvent(input$accept_twl, {
@@ -712,11 +807,6 @@ server <- function(input, output, session) {
   observe({
     if(resetEdits$accept>2 & resetEdits$accept%%2 == 1) {
       dat$Twl$Twilight <- dat$Twl$Twilight3
-      
-      updateActionButton(session, "accept_twl",
-                         label =  "reset")
-      updateActionButton(session, "accept_edits",
-                         label =  "accept")
     }
   })
   
@@ -857,17 +947,207 @@ server <- function(input, output, session) {
     resetEdits$accept <- resetEdits$accept + 1
   })
   
+  #############################
+  #### 3 Calibration ##########
+  ##########################
+  
+  output$lonC <- renderText({dat$Mdata$lon.calib})
+  output$latC <- renderText({dat$Mdata$lat.calib})
+  
+  observeEvent(input$show3, {
+    showModal(modalDialog(
+      title = "Calibration",
+      HTML("TBA"),
+      easyClose = TRUE
+    ))
+  })
+  
+  selectedCalibRange1 <- reactiveValues(min = NULL, max = NULL)
+  selectedCalibRange2 <- reactiveValues(min = NULL, max = NULL) 
+  
+  observe({
+    if(input$lock_calib1) {
+      selectedCalibRange1$min <- input$calibRange1[1]
+      selectedCalibRange1$max <- input$calibRange1[2]
+      output$calib_range1     <- renderText({paste0(format(selectedCalibRange1$min, "%Y/%m/%d"), " - ", format(selectedCalibRange1$max, "%Y/%m/%d"))})
+    } else {
+      selectedCalibRange1$min <- NULL
+      selectedCalibRange1$max <- NULL
+      output$calib_range1      <- renderText({"not active"})
+    }
+    
+    if(input$lock_calib2) {
+      selectedCalibRange2$min <- input$calibRange2[1]
+      selectedCalibRange2$max <- input$calibRange2[2]
+      output$calib_range2      <- renderText({paste0(format(selectedCalibRange2$min, "%Y/%m/%d"), " - ", format(selectedCalibRange2$max, "%Y/%m/%d"))})
+    } else {
+      selectedCalibRange2$min <- NULL
+      selectedCalibRange2$max <- NULL
+      output$calib_range2      <- renderText({"not active"})
+    }
+    
+  })
+  
+  output$calibSlider1 <- renderUI({
+    sliderInput("calibRange1", "",
+                min = min(dat$Twl$Twilight, na.rm = TRUE),
+                max = max(dat$Twl$Twilight, na.rm = TRUE),
+                value = range(dat$Twl$Twilight, na.rm = TRUE),
+                ticks = FALSE,
+                timeFormat = "%F",
+                width = '96%')
+  })
+  
+  output$calibSlider2 <- renderUI({
+    sliderInput("calibRange2", "",
+                min = min(dat$Twl$Twilight, na.rm = TRUE),
+                max = max(dat$Twl$Twilight, na.rm = TRUE),
+                value = range(dat$Twl$Twilight, na.rm = TRUE),
+                ticks = FALSE,
+                timeFormat = "%F",
+                width = '96%')
+  })
+  
+  
+  output$twilightCalib <- renderPlot({
+    
+    opar <- par(mar = c(0, 0, 0, 0))
+    lightImage(dat$Raw[dat$Mdata$range,], offset = input$offset, zlim = c(0, 10), dt = 120, xaxt = "n", yaxt = "n")
+    tsimageDeploymentLines(dat$Raw$Date[dat$Mdata$range], input$lon.calib0, input$lat.calib0, offset = input$offset,
+                           lwd = 4, col = adjustcolor("orange", alpha.f = 0.6))
+    tsimagePoints(dat$Twl$Twilight, offset = input$offset, pch = 16, cex = 0.8,
+                  col = ifelse(dat$Twl$Deleted, "grey40", ifelse(dat$Twl$Rise, "dodgerblue", "firebrick")))
+
+    if(input$lock_calib1) {
+      rect(as.numeric(selectedCalibRange1$min), -25, as.numeric(selectedCalibRange1$max), 25, border = NA, col = adjustcolor("orange", alpha.f = 0.25))
+    }
+    if(input$lock_calib2) {
+      rect(as.numeric(selectedCalibRange2$min), -25, as.numeric(selectedCalibRange2$max), 25, border = NA, col = adjustcolor("orange", alpha.f = 0.25))
+    }
+
+    par(opar)
+    
+  })
+  
+  
+  calib_twl <- reactive({
+    if(any(c(input$lock_calib1, input$lock_calib2))) {
+      
+      if(input$lock_calib1 & !input$lock_calib2) {
+        tab <- subset(dat$Twl, Twilight>=selectedCalibRange1$min & Twilight<=selectedCalibRange1$max)
+      }
+      if(!input$lock_calib1 & input$lock_calib2) {
+        tab <- subset(dat$Twl, Twilight>=selectedCalibRange2$min & Twilight<=selectedCalibRange2$max)
+      }
+      if(input$lock_calib1 & input$lock_calib2) {
+        tab <- subset(dat$Twl, (Twilight>=selectedCalibRange1$min & Twilight<=selectedCalibRange1$max) |
+                        (Twilight>=selectedCalibRange2$min & Twilight<=selectedCalibRange2$max))
+      }
+      return(tab)
+    } else return(NULL)
+    
+  })
+  
+  observe({
+    if(!is.null(calib_twl())) {
+      dat$Calib$twl.calib <- calib_twl()
+    }
+  })
+
+  calibTab <- reactive({
+    
+    if(!is.null(calib_twl())) {
+      
+      tab <- data.frame(Twilight = calib_twl()$Twilight, Rise = calib_twl()$Rise)
+      sun <- solar(tab[, 1])
+      z <- refracted(zenith(sun, input$lon.calib0, input$lat.calib0))
+      
+      inc = 0
+      
+      repeat {
+        twl_t <- twilight(tab[, 1], input$lon.calib0, input$lat.calib0, rise = tab[, 2], zenith = max(z) + inc)
+        twl_dev <- ifelse(tab$Rise, as.numeric(difftime(tab[, 1], twl_t, units = "mins")), as.numeric(difftime(twl_t, tab[, 1], units = "mins")))
+        if (all(twl_dev >= 0) | inc>2) break  else inc <- inc + 0.01
+      }
+      
+      if(all(twl_dev>=0 & twl_dev<5*60)) {
+        z0 <- max(z) + inc
+        seq <- seq(0, max(twl_dev), length = 100)
+        if (input$CalibMethod == "log-norm") {
+          fitml_ng <- suppressWarnings(fitdistr(twl_dev, "log-normal"))
+          lns <- dlnorm(seq, fitml_ng$estimate[1], fitml_ng$estimate[2])
+        }
+        if(input$CalibMethod== "gamma") {
+          fitml_ng <- suppressWarnings(fitdistr(twl_dev, "gamma"))
+          lns <- dgamma(seq, fitml_ng$estimate[1], fitml_ng$estimate[2])
+        }
+        
+        z1 <- median(z)
+        
+        return(list(twlDev = twl_dev, z = z, method = input$CalibMethod, z1 = z1, z0 = z0, shape = fitml_ng$estimate[1], rate = fitml_ng$estimate[2]))
+      } else return(NULL)
+    } else return(NULL)
+  })
+
+  observe({
+    if(!is.null(calibTab())) {
+      dat$Calib$zenith  <- calibTab()$z1
+      dat$Calib$zenith0 <- calibTab()$z0
+      dat$Calib$alpha   <- c(calibTab()$shape, calibTab()$rate)
+      dat$Calib$method  <- input$CalibMethod
+    }
+  })
+  
+  output$calibration <- renderPlot({
+
+    if(!is.null(calibTab()) & !is.null(input$lon.calib0) & !is.null(input$lat.calib0)) {
+
+      opar <- par(mar = c(4, 4, 1, 1))
+      hist(calibTab()$twlDev, freq = F, breaks = 26, main = "", xlab = "twilight error (min)", col = "grey85")
+
+      seq <- seq(0, max(calibTab()$twlDev), length = 100)
+      if(input$CalibMethod== "gamma") {
+        lines(seq, dgamma(seq, calibTab()$shape, calibTab()$rate), col = "firebrick", lwd = 3, lty = 2)
+      } else {
+        lines(seq, dlnorm(seq, calibTab()$shape, calibTab()$rate), col = "firebrick", lwd = 3, lty = 2)
+      }
+
+      diffz <- as.data.frame(cbind(min = apply(cbind(calib_twl()$Twilight,
+                                                     twilight(calib_twl()$Twilight, input$lon.calib0, input$lat.calib0, rise = calib_twl()$Rise, zenith = calibTab()$z0)), 1,
+                                               function(x) abs(x[1] - x[2]))/60, z = calibTab()$z))
+      mod <- lm(min ~ z, data = diffz)
+
+      points(predict(mod, newdata = data.frame(z = calibTab()$z0)), 0,
+             pch = 21, cex = 5, bg = "white", lwd = 2, xpd = TRUE)
+      text(predict(mod, newdata = data.frame(z = calibTab()$z0)), 0, "z0")
+
+      points(predict(mod, newdata = data.frame(z = calibTab()$z1)), 0,
+             pch = 21, cex = 5, bg = "white", lwd = 2, xpd = TRUE)
+      text(predict(mod, newdata = data.frame(z = calibTab()$z1)), 0, "z1")
+
+      par(opar)
+
+    } else plot(1,1, xaxt = "n", yaxt = "n", type = "n", bty = "n", xlab = "", ylab = "")
+
+  })
+
+  output$z0    <- renderText({ifelse(!is.null(calibTab()), calibTab()$z0, "not defined")})
+  output$z1    <- renderText({ifelse(!is.null(calibTab()), calibTab()$z1, "not defined")})
+  output$shape <- renderText({ifelse(!is.null(calibTab()), calibTab()$shape, "not defined")})
+  output$rate  <- renderText({ifelse(!is.null(calibTab()), calibTab()$rate, "not defined")})
+
   
   ###################
   #### End ##########
   ###################
-
   s4 <- reactive({
-      new("VWSGapp",
-          ID    = dat$ID,
-          Mdata = dat$Mdata,
-          Raw   = dat$Raw,
-          Twl   = dat$Twl)
+      new("GeolocApp",
+          ID        = dat$ID,
+          Mdata     = dat$Mdata,
+          Raw       = dat$Raw,
+          Twl       = dat$Twl,
+          Calib     = dat$Calib,
+          Locations = dat$Locations)
   })
   
 }
