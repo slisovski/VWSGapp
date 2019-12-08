@@ -1235,7 +1235,7 @@ server <- function(input, output, session) {
   
   observe({
     if(!is.null(dat$Calib$zenith)) {
-      lcs <- with(dat$Twl[!dat$Twl$Deleted, ], thresholdLocation(Twilight, Rise, zenith = dat$Calib$zenith))
+      lcs <- with(dat$Twl[!dat$Twl$Deleted, ], thresholdPath(Twilight, Rise, zenith = dat$Calib$zenith, tol = 0.04))
       dat$Locations <- data.frame(Date = lcs$time, Lon = lcs$x[,1], Lat = lcs$x[,2])
     }
   })
