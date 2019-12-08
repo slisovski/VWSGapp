@@ -5,8 +5,8 @@ account: slisovski
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 1144736
-bundleId: 2649186
+bundleId: 2649190
 url: https://slisovski.shinyapps.io/vwsgapp/
-when: 1575752062.19216
+when: 1575752499.58458
 asMultiple: FALSE
 asStatic: FALSE

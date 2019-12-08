@@ -3,6 +3,8 @@ library(markdown)
 library(shinyWidgets)
 library(MASS)
 library(TwGeos)
+library(maptools)
+library(sp)
 library(SGAT)
 library(leaflet)
 library(shinycssloaders)
@@ -253,45 +255,39 @@ ui <- fluidPage(
                           
                           h4("1.Select calibration period(s)"),
                           
-                          conditionalPanel(
-                            condition = "input.accept_twl",
-                            fluidRow(column(width=8, verbatimTextOutput("calib_range1")),
-                                     column(width=2, materialSwitch(
+                          materialSwitch(
                                        inputId = "lock_calib1",
                                        label   = "", 
                                        status  = "success",
                                        value   = FALSE,
                                        right   = TRUE
-                                     ))),
-                            fluidRow(column(width=8, verbatimTextOutput("calib_range2")),
-                                     column(width=2, materialSwitch(
+                                     ),
+                          materialSwitch(
                                        inputId = "lock_calib2",
                                        label   = "", 
                                        status  = "success",
                                        value   = FALSE,
                                        right   = TRUE
-                                     ))),
+                                     ),
+                          hr(),
                             
-                            hr(),
-                            
-                            pickerInput(
+                          pickerInput(
                               inputId = "CalibMethod",
                               label = "Calibration Method", 
                               choices = c("log-norm", "gamma"),
                               selected = "gamma"
-                            ),
-                            
-                            fluidRow(column(width=5, verbatimTextOutput("z1")),
-                                     column(width=5, h5("zenith"))),
-                            fluidRow(column(width=5, verbatimTextOutput("z0")),
-                                     column(width=5, h5("TwModel 1"))),
-                            fluidRow(column(width=5, verbatimTextOutput("shape")),
-                                     column(width=5, h5("TwModel 2"))),
-                            fluidRow(column(width=5, verbatimTextOutput("rate")),
-                                     column(width=5, h5("TwModel 3"))),
-                            
-                            hr()
                           ),
+                            
+                          fluidRow(column(width=5, verbatimTextOutput("z1")),
+                                   column(width=5, h5("zenith"))),
+                          fluidRow(column(width=5, verbatimTextOutput("z0")),
+                                   column(width=5, h5("TwModel 1"))),
+                          fluidRow(column(width=5, verbatimTextOutput("shape")),
+                                   column(width=5, h5("TwModel 2"))),
+                          fluidRow(column(width=5, verbatimTextOutput("rate")),
+                                   column(width=5, h5("TwModel 3"))),
+                            
+                          hr(),
                           
                           downloadButton("savePrj3", "Save project"),
                           
@@ -316,7 +312,25 @@ ui <- fluidPage(
              ##### 4. Locations ###
              ###################
              tabPanel("Track estimate",
-                      leafletOutput("map", width = "100%", height = 750)
+                      sidebarLayout(
+                        sidebarPanel(
+                          numericInput("cexSize", "Point size", 3, min = 1, max = 10, step = 0.5),
+                          numericInput("lwdSize", "Path width", 3, min = 1, max = 10, step = 0.5),
+                          hr(),
+                          fluidPage(
+                            column(8, offset = 0,
+                                   downloadButton("downloadCrds", "crds.csv")),
+                            column(8,
+                                   downloadButton("downloadKml", "crds.kml"))
+                          ),
+                          hr(),
+                          downloadButton("savePrj4", "Save project")
+                        ),
+                        mainPanel(  
+                          leafletOutput("map", width = "100%", height = 750),
+                          fluidRow(align="center", uiOutput("locsSlider"))
+                        )
+                      )
              )
              
              
@@ -340,6 +354,8 @@ server <- function(input, output, session) {
                            Raw = data.frame(),
                            Twl = data.frame(),
                            Calib = list(twl.calib = data.frame(),
+                                        twl.dev   = NULL,
+                                        z         = NULL,
                                         range     = list(
                                                         range1.min = NULL,
                                                         range1.max = NULL,
@@ -401,6 +417,15 @@ server <- function(input, output, session) {
   )
   
   output$savePrj3 <- downloadHandler(
+    filename = function() {
+      paste(dat$ID, "_", Sys.Date(), ".RData", sep="")
+    },
+    content = function(file) {
+      saveRDS(s4(), file = file)
+    }
+  )
+  
+  output$savePrj4 <- downloadHandler(
     filename = function() {
       paste(dat$ID, "_", Sys.Date(), ".RData", sep="")
     },
@@ -498,12 +523,11 @@ server <- function(input, output, session) {
         
         if(!is.null(dat$Calib$range$range1.min)) {
           updateMaterialSwitch(session, "lock_calib1", value = TRUE)
-          output$calib_range1 <- renderText({paste0(format(dat$Calib$range$range1.min, "%Y/%m/%d"), " - ", format(dat$Calib$range$range1.max, "%Y/%m/%d"))})
-        } else  output$calib_range1 <- renderText({"-"})
+        }
+        
         if(!is.null(dat$Calib$range$range2.min)) {
           updateMaterialSwitch(session, "lock_calib2", value = TRUE)
-          output$calib_range2 <- renderText({paste0(format(dat$Calib$range$range2.min, "%Y/%m/%d"), " - ", format(dat$Calib$range$range2.max, "%Y/%m/%d"))})
-        } else output$calib_range2 <- renderText({"-"})
+        }
         
         rangeStart$min1 <- dat$Calib$range$range1.min
         rangeStart$max1 <- dat$Calib$range$range1.max
@@ -513,11 +537,12 @@ server <- function(input, output, session) {
         
         updatePickerInput(session, "CalibMethod", env@Calib$model)
         
-    } else {
-      output$calib_range1 <- renderText({"-"})
-      output$calib_range2 <- renderText({"-"})
     }
-    
+      
+    if(nrow(env@Locations)>0) {
+      dat$Locations <- env@Locations
+    }
+      
     updateTextInput(session, "loggerID", value = env@ID)
     ind$acceptS4 <- TRUE
     
@@ -527,7 +552,6 @@ server <- function(input, output, session) {
     }
   
   })
-  
   
   observeEvent(input$Offset, {
     dat$Mdata$offset <- input$Offset
@@ -1013,15 +1037,17 @@ server <- function(input, output, session) {
     ))
   })
 
+
   observe({
-    if(nrow(dat$Twl)>0 & is.null(rangeStart$min1)) {
+    if(nrow(dat$Twl)>0) {
+      if(is.null(rangeStart$min1)) {
       rangeStart$min1 <- min(dat$Twl$Twilight)
       rangeStart$max1 <- min(dat$Twl$Twilight) + 10*24*60*60
+      }
+      if(is.null(rangeStart$min2)) {
       rangeStart$min2 <- max(dat$Twl$Twilight) - 10*24*60*60
       rangeStart$max2 <- max(dat$Twl$Twilight)
-      
-      output$calib_range1 <- renderText({"-"})
-      output$calib_range2 <- renderText({"-"})
+      }
     }
   })
   
@@ -1052,33 +1078,37 @@ server <- function(input, output, session) {
   observe({
     if(any(c(input$lock_calib1, input$lock_calib2))) {
       if(input$lock_calib1 & !input$lock_calib2) {
-        dat$Calib$twl.calib <- subset(dat$Twl, Twilight>=as.POSIXct(as.numeric(input$calibRange1[1]), origin = "1970-01-01", tz = "GMT") & 
+        dat$Calib$twl.calib <- subset(dat$Twl, Twilight>=as.POSIXct(as.numeric(input$calibRange1[1]), origin = "1970-01-01", tz = "GMT") &
                                                Twilight<=as.POSIXct(as.numeric(input$calibRange1[2]), origin = "1970-01-01", tz = "GMT"))
-        
-        output$calib_range1 <- renderText({paste0(format(as.POSIXct(as.numeric(input$calibRange1[1]), origin = "1970-01-01", tz = "GMT"), "%Y/%m/%d"), " - ", 
-                                                  format(as.POSIXct(as.numeric(input$calibRange1[2]), origin = "1970-01-01", tz = "GMT"), "%Y/%m/%d"))})
-        output$calib_range2 <- renderText({"-"})
+        dat$Calib$range$range1.min <- as.POSIXct(as.numeric(input$calibRange1[1]), origin = "1970-01-01", tz = "GMT")
+        dat$Calib$range$range1.max <- as.POSIXct(as.numeric(input$calibRange1[2]), origin = "1970-01-01", tz = "GMT")
+        dat$Calib$range$range2.min <- NULL
+        dat$Calib$range$range2.max <- NULL
       }
       if(!input$lock_calib1 & input$lock_calib2) {
-        dat$Calib$twl.calib <- subset(dat$Twl, Twilight>=as.POSIXct(as.numeric(input$calibRange2[1]), origin = "1970-01-01", tz = "GMT") & 
+        dat$Calib$twl.calib <- subset(dat$Twl, Twilight>=as.POSIXct(as.numeric(input$calibRange2[1]), origin = "1970-01-01", tz = "GMT") &
                                                Twilight<=as.POSIXct(as.numeric(input$calibRange2[2]), origin = "1970-01-01", tz = "GMT"))
-        
-        output$calib_range2 <- renderText({paste0(format(as.POSIXct(as.numeric(input$calibRange2[1]), origin = "1970-01-01", tz = "GMT"), "%Y/%m/%d"), " - ", 
-                                                  format(as.POSIXct(as.numeric(input$calibRange2[2]), origin = "1970-01-01", tz = "GMT"), "%Y/%m/%d"))})
-        output$calib_range1 <- renderText({"-"})
+        dat$Calib$range$range1.min <- NULL
+        dat$Calib$range$range1.max <- NULL
+        dat$Calib$range$range2.min <- as.POSIXct(as.numeric(input$calibRange2[1]), origin = "1970-01-01", tz = "GMT")
+        dat$Calib$range$range2.max <- as.POSIXct(as.numeric(input$calibRange2[2]), origin = "1970-01-01", tz = "GMT")
       }
       if(input$lock_calib1 & input$lock_calib2) {
-        dat$Calib$twl.calib <- subset(dat$Twl, (Twilight>=as.POSIXct(as.numeric(input$calibRange1[1]), origin = "1970-01-01", tz = "GMT") & 
+        dat$Calib$twl.calib <- subset(dat$Twl, (Twilight>=as.POSIXct(as.numeric(input$calibRange1[1]), origin = "1970-01-01", tz = "GMT") &
                                                   Twilight<=as.POSIXct(as.numeric(input$calibRange1[2]), origin = "1970-01-01", tz = "GMT")) |
-                                               (Twilight>=as.POSIXct(as.numeric(input$calibRange2[1]), origin = "1970-01-01", tz = "GMT") & 
+                                               (Twilight>=as.POSIXct(as.numeric(input$calibRange2[1]), origin = "1970-01-01", tz = "GMT") &
                                                   Twilight<=as.POSIXct(as.numeric(input$calibRange2[2]), origin = "1970-01-01", tz = "GMT")))
-        
-        output$calib_range1 <- renderText({paste0(format(as.POSIXct(as.numeric(input$calibRange1[1]), origin = "1970-01-01", tz = "GMT"), "%Y/%m/%d"), " - ", 
-                                                  format(as.POSIXct(as.numeric(input$calibRange1[2]), origin = "1970-01-01", tz = "GMT"), "%Y/%m/%d"))})
-        output$calib_range2 <- renderText({paste0(format(as.POSIXct(as.numeric(input$calibRange2[1]), origin = "1970-01-01", tz = "GMT"), "%Y/%m/%d"), " - ", 
-                                                  format(as.POSIXct(as.numeric(input$calibRange2[2]), origin = "1970-01-01", tz = "GMT"), "%Y/%m/%d"))})
+        dat$Calib$range$range1.min <- as.POSIXct(as.numeric(input$calibRange1[1]), origin = "1970-01-01", tz = "GMT")
+        dat$Calib$range$range1.max <- as.POSIXct(as.numeric(input$calibRange1[2]), origin = "1970-01-01", tz = "GMT")
+        dat$Calib$range$range2.min <- as.POSIXct(as.numeric(input$calibRange2[1]), origin = "1970-01-01", tz = "GMT")
+        dat$Calib$range$range2.max <- as.POSIXct(as.numeric(input$calibRange2[2]), origin = "1970-01-01", tz = "GMT")
       }
     } else {
+      dat$Calib$range$range1.min <- NULL
+      dat$Calib$range$range1.max <- NULL
+      dat$Calib$range$range2.min <- NULL
+      dat$Calib$range$range2.max <- NULL
+      
       dat$Calib$twl.calib <- data.frame()
     }
   })
@@ -1095,102 +1125,102 @@ server <- function(input, output, session) {
                     col = ifelse(dat$Twl$Deleted, "grey40", ifelse(dat$Twl$Rise, "dodgerblue", "firebrick")))
     
       if(input$lock_calib1) {
-        tryCatch(rect(as.numeric(input$calibRange1[1]), -25, as.numeric(input$calibRange1[2]), 25, border = NA, col = adjustcolor("orange", alpha.f = 0.25)), error = function(e) NULL)
+              tryCatch(rect(as.numeric(input$calibRange1[1]), -25, as.numeric(input$calibRange1[2]), 25, border = NA, col = adjustcolor("orange", alpha.f = 0.25)), error = function(e) NULL)
       } else  tryCatch(rect(as.numeric(input$calibRange1[1]), -25, as.numeric(input$calibRange1[2]), 25, border = NA, col = adjustcolor("cornflowerblue", alpha.f = 0.25)), error = function(e) NULL)
       if(input$lock_calib2) {
-        tryCatch(rect(as.numeric(input$calibRange2[1]), -25, as.numeric(input$calibRange2[2]), 25, border = NA, col = adjustcolor("orange", alpha.f = 0.25)), error = function(e) NULL)
+              tryCatch(rect(as.numeric(input$calibRange2[1]), -25, as.numeric(input$calibRange2[2]), 25, border = NA, col = adjustcolor("orange", alpha.f = 0.25)), error = function(e) NULL)
       } else  tryCatch(rect(as.numeric(input$calibRange2[1]), -25, as.numeric(input$calibRange2[2]), 25, border = NA, col = adjustcolor("cornflowerblue", alpha.f = 0.25)), error = function(e) NULL)
       
     par(opar)
     
   })
+
   
-  calibTab <- reactive({
-
+  observe({
     if(nrow(dat$Calib$twl.calib)>2) {
-
+      
       sun <- solar(dat$Calib$twl.calib$Twilight)
       z   <- refracted(zenith(sun, input$lon.calib0, input$lat.calib0))
-
+      
       inc = 0
-
+      
       repeat {
         twl_t   <- twilight(dat$Calib$twl.calib$Twilight, input$lon.calib0, input$lat.calib0, rise = dat$Calib$twl.calib$Rise, zenith = max(z) + inc)
         twl_dev <- ifelse(dat$Calib$twl.calib$Rise, as.numeric(difftime(dat$Calib$twl.calib$Twilight, twl_t, units = "mins")), as.numeric(difftime(twl_t, dat$Calib$twl.calib$Twilight, units = "mins")))
         if (all(twl_dev >= 0) | inc>2) break  else inc <- inc + 0.01
       }
-
+      
       if(all(twl_dev>=0 & twl_dev<5*60)) {
         z0 <- max(z) + inc
         seq <- seq(0, max(twl_dev), length = 100)
-        if (input$CalibMethod == "log-norm") {
+      if (input$CalibMethod == "log-norm") {
           fitml_ng <- suppressWarnings(fitdistr(twl_dev, "log-normal"))
           lns      <- dlnorm(seq, fitml_ng$estimate[1], fitml_ng$estimate[2])
         }
-        if(input$CalibMethod== "gamma") {
+      if(input$CalibMethod== "gamma") {
           fitml_ng <- suppressWarnings(fitdistr(twl_dev, "gamma"))
           lns      <- dgamma(seq, fitml_ng$estimate[1], fitml_ng$estimate[2])
         }
 
-        z1 <- median(z)
-        
-        return(list(twlDev = twl_dev, z = z, method = input$CalibMethod, z1 = z1, z0 = z0, shape = fitml_ng$estimate[1], rate = fitml_ng$estimate[2]))
-      
-        } else return(NULL)
-      
-    } else return(NULL)
-    
-  })
 
-  
-  output$calibration <- renderPlot({
-    
-    if(!is.null(calibTab())) {
+      dat$Calib$twl.dev <- twl_dev
+      dat$Calib$z       <- z
+      dat$Calib$zenith  <- median(z)
+      dat$Calib$zenith0 <- z0
+      dat$Calib$alpha   <- fitml_ng$estimate[1:2]
+      dat$Calib$method  <- input$CalibMethod
       
-      opar <- par(mar = c(4, 4, 1, 1))
-      hist(calibTab()$twlDev, freq = F, breaks = 26, main = "", xlab = "twilight error (min)", col = "grey85")
-      
-      seq <- seq(0, max(calibTab()$twlDev), length = 100)
-      if(input$CalibMethod== "gamma") {
-        lines(seq, dgamma(seq, calibTab()$shape, calibTab()$rate), col = "firebrick", lwd = 3, lty = 2)
       } else {
-        lines(seq, dlnorm(seq, calibTab()$shape, calibTab()$rate), col = "firebrick", lwd = 3, lty = 2)
-      }
       
-      diffz <- as.data.frame(cbind(min = apply(cbind(dat$Calib$twl.calib$Twilight,
-                                                     twilight(dat$Calib$twl.calib$Twilight, input$lon.calib0, input$lat.calib0, rise = dat$Calib$twl.calib$Rise, zenith = calibTab()$z0)), 1,
-                                               function(x) abs(x[1] - x[2]))/60, z = calibTab()$z))
-      mod <- lm(min ~ z, data = diffz)
-      
-      points(predict(mod, newdata = data.frame(z = calibTab()$z0)), 0,
-             pch = 21, cex = 5, bg = "white", lwd = 2, xpd = TRUE)
-      text(predict(mod, newdata = data.frame(z = calibTab()$z0)), 0, "z0")
-      
-      points(predict(mod, newdata = data.frame(z = calibTab()$z1)), 0,
-             pch = 21, cex = 5, bg = "white", lwd = 2, xpd = TRUE)
-      text(predict(mod, newdata = data.frame(z = calibTab()$z1)), 0, "z1")
-      
-      par(opar)
-      
-    } else plot(1,1, xaxt = "n", yaxt = "n", type = "n", bty = "n", xlab = "", ylab = "")
-    
-  })
-  
-
-  observe({
-    if(!is.null(calibTab())) {
-      dat$Calib$zenith  <- isolate(calibTab()$z1)
-      dat$Calib$zenith0 <- isolate(calibTab()$z0)
-      dat$Calib$alpha   <- c(isolate(calibTab()$shape), isolate(calibTab()$rate))
-      dat$Calib$method  <- isolate(input$CalibMethod)
-      
-      
-      dat$Calib$range$range1.min <- as.POSIXct(as.numeric(input$calibRange1[1]), origin = "1970-01-01", tz = "GMT")
-      dat$Calib$range$range1.max <- as.POSIXct(as.numeric(input$calibRange1[2]), origin = "1970-01-01", tz = "GMT")
-      dat$Calib$range$range2.min <- as.POSIXct(as.numeric(input$calibRange2[1]), origin = "1970-01-01", tz = "GMT")
-      dat$Calib$range$range2.max <- as.POSIXct(as.numeric(input$calibRange2[2]), origin = "1970-01-01", tz = "GMT")
+        dat$Calib$twl.dev <- NULL
+        dat$Calib$z       <- NULL
+        dat$Calib$zenith  <- NULL
+        dat$Calib$zenith0 <- NULL
+        dat$Calib$alpha   <- NULL
+        dat$Calib$method  <- NULL
+      } 
+    } else {
+      dat$Calib$twl.dev <- NULL
+      dat$Calib$z       <- NULL
+      dat$Calib$zenith  <- NULL
+      dat$Calib$zenith0 <- NULL
+      dat$Calib$alpha   <- NULL
+      dat$Calib$method  <- NULL
     }
   })
+  
+  
+  output$calibration <- renderPlot({
+
+    if(!is.null(dat$Calib$twl.dev)) {
+
+      opar <- par(mar = c(4, 4, 1, 1))
+      hist(dat$Calib$twl.dev, freq = F, breaks = 26, main = "", xlab = "twilight error (min)", col = "grey85")
+
+      seq <- seq(0, max(dat$Calib$twl.dev), length = 100)
+      if(dat$Calib$method == "gamma") {
+        lines(seq, dgamma(seq, dat$Calib$alpha[1], dat$Calib$alpha[2]), col = "firebrick", lwd = 3, lty = 2)
+      } else {
+        lines(seq, dlnorm(seq, dat$Calib$alpha[1], dat$Calib$alpha[2]), col = "firebrick", lwd = 3, lty = 2)
+      }
+
+      diffz <- data.frame(z = dat$Calib$z, min = dat$Calib$twl.dev)
+      mod <- lm(min ~ z, data = diffz)
+
+      points(predict(mod, newdata = data.frame(z = dat$Calib$zenith0)), 0,
+             pch = 21, cex = 5, bg = "white", lwd = 2, xpd = TRUE)
+      text(predict(mod, newdata = data.frame(z = dat$Calib$zenith0)), 0, "z0")
+
+      points(predict(mod, newdata = data.frame(z = dat$Calib$zenith)), 0,
+             pch = 21, cex = 5, bg = "white", lwd = 2, xpd = TRUE)
+      text(predict(mod, newdata = data.frame(z = dat$Calib$zenith)), 0, "z1")
+
+      par(opar)
+
+    } else plot(1,1, xaxt = "n", yaxt = "n", type = "n", bty = "n", xlab = "", ylab = "")
+
+  })
+  
   
   output$z0    <- renderText({ifelse(!is.null(dat$Calib$zenith),  dat$Calib$zenith,   "-")})
   output$z1    <- renderText({ifelse(!is.null(dat$Calib$zenith0), dat$Calib$zenith0,  "-")})
@@ -1203,39 +1233,85 @@ server <- function(input, output, session) {
   #### 4. Locations ###########
   ##########################
   
-  coords <- reactive({
-    if(!is.null(calibTab())) {
-      tab <- with(dat$Twl[!dat$Twl$Deleted, ], thresholdLocation(Twilight, Rise, zenith = calibTab()$z1)$x)
-      return(tab)
-    } else {
-      return(data.frame())
+  observe({
+    if(!is.null(dat$Calib$zenith)) {
+      lcs <- with(dat$Twl[!dat$Twl$Deleted, ], thresholdLocation(Twilight, Rise, zenith = dat$Calib$zenith))
+      dat$Locations <- data.frame(Date = lcs$time, Lon = lcs$x[,1], Lat = lcs$x[,2])
     }
   })
+
   
-  observe({
-      dat$Locations <- isolate(coords())
+  output$locsSlider <- renderUI({
+    sliderInput("locsRange", "",
+                min   = min(dat$Locations$Date, na.rm = TRUE),
+                max   = max(dat$Locations$Date, na.rm = TRUE),
+                value = range(dat$Locations$Date, na.rm = T),
+                step  = 1,
+                ticks = FALSE,
+                timeFormat = "%F",
+                width      = '96%')
+  })
+  
+  crdsShow <- reactive({
+    if(nrow(dat$Locations)>0) {
+      out <- dat$Locations[dat$Locations$Date>=as.POSIXct(as.numeric(input$locsRange[1]), origin = "1970-01-01", tz = "GMT") &
+                                     dat$Locations$Date<=as.POSIXct(as.numeric(input$locsRange[2]), origin = "1970-01-01", tz = "GMT") &
+                                     !is.nan(dat$Locations$Lat), 2:3]
+      M   <- matrix(c(out[,1], out[,2]), ncol = 2, byrow = FALSE)                
+      return(M)
+    } else return(NULL)
   })
   
   output$map <- renderLeaflet({
-    
-    if(nrow(coords())>0) {
+
+    if(is.null(crdsShow())) {
       leaflet() %>%
         addProviderTiles(providers$Esri.WorldGrayCanvas,
                          options = providerTileOptions(noWrap = FALSE)
-                         
-        ) 
+
+        )
     } else {
       leaflet() %>%
         addProviderTiles(providers$Esri.WorldGrayCanvas,
                          options = providerTileOptions(noWrap = FALSE)
-        ) %>%
-        addPolylines(data = coords()[!is.nan(coords()[,2]),], color = adjustcolor("orange", alpha.f = 0.75), weight = 4, ) %>%
-        addCircleMarkers(data = coords()[!is.nan(coords()[,2]),], color = "orange", weight = 1)
+        )  %>%
+        addPolylines(data     = crdsShow(), color = adjustcolor("orange", alpha.f = 0.75), weight = input$lwdSize) %>%
+        addCircleMarkers(data = crdsShow(), color = "orange", weight = 2, radius = input$cexSize) %>% 
+        addCircleMarkers(input$lon.calib0, input$lat.calib0, color = "#ff0000")
     }
   })
   
+  output$downloadCrds <- downloadHandler(
+    filename = function() {
+      paste(dat$ID, "_crds.csv", sep = "")
+    },
+    content = function(file) {
+      write.csv(dat$Locations, file, row.names = FALSE)
+    }
+  )
   
+  output$downloadKml <- downloadHandler(
+    
+    filename = function() {
+      paste(dat$ID, "_crds.klm", sep = "")
+    },
+    content = function(file) {
+
+      crds <- as.matrix(dat$Locations[!is.nan(dat$Locations$Lat), 2:3])
+      spp  <- SpatialPointsDataFrame(coords = crds, data = dat$Locations[!is.nan(dat$Locations$Lat),], proj4string = CRS("+proj=longlat"))
+      
+      kmlname        <- paste(dat$ID, "_crds.klm")
+      kmldescription <- paste(dat$ID, ": Geolocator location estimates (GeolocApp).")
+      icon        <- "http://www.gstatic.com/mapspro/images/stock/962-wht-diamond-blank.png"
+      name        <- paste(dat$Locations$Date[!is.nan(dat$Locations$Lat)])
+      description <- paste("<b>owner:</b>", dat$ID, "<br><b>dates:</b>", dat$Locations$Date[!is.nan(dat$Locations$Lat)])
+
+      kmlPoints(spp, kmlfile=file, name=name, description=description,
+                icon=icon, kmlname=kmlname, kmldescription=kmldescription)
+    }
+  )
   
+
   
   ###################
   #### End ##########
