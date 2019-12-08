@@ -4,6 +4,7 @@ library(shinyWidgets)
 library(MASS)
 library(TwGeos)
 library(maptools)
+library(zoo)
 library(sp)
 library(SGAT)
 library(leaflet)
@@ -880,7 +881,7 @@ server <- function(input, output, session) {
     }
   })
   
-  edit       <- reactiveValues(new = NULL, twilight = NULL, rise = NULL, deleted = NULL, key = NULL, event = 1)
+  edit       <- reactiveValues(new = NULL, twilight = NULL, rise = NULL, deleted = NULL, key = NULL, event = 1, selected = NULL)
   resetEdits <- reactiveValues(accept = 0)
   
   observe({
@@ -888,6 +889,20 @@ server <- function(input, output, session) {
       edit$twilight <- as.POSIXct(as.numeric(isolate(dat$Twl$Twilight)), origin = "1970-01-01", tz = "GMT")
       edit$rise     <- isolate(dat$Twl$Rise)
       edit$deleted  <- isolate(dat$Twl$Deleted)
+    
+      if(is.null(edit$selected)) {
+        srT   <- as.numeric(dat$Twl$Twilight[dat$Twl$Rise]) - as.numeric(as.POSIXct(format(dat$Twl$Twilight[dat$Twl$Rise], "%Y-%m-%d"), tz = "GMT"))
+        srRM  <- abs(apply(cbind(srT, c(srT[1:2] ,rollmean(srT, k = 5), srT[(length(srT)-1):length(srT)])), 1, function(x) x[1]-x[2])/60)
+        outSr <- ifelse(srRM>quantile(srRM, probs = 0.9), TRUE, FALSE)  
+          
+        ssT  <- as.numeric(dat$Twl$Twilight[!dat$Twl$Rise]) - as.numeric(as.POSIXct(format(dat$Twl$Twilight[!dat$Twl$Rise], "%Y-%m-%d"), tz = "GMT"))
+        ssRM <- abs(apply(cbind(ssT, c(ssT[1:2] ,rollmean(ssT, k = 5), ssT[(length(ssT)-1):length(ssT)])), 1, function(x) x[1]-x[2])/60)
+        outSs <- ifelse(ssRM>quantile(ssRM, probs = 0.9), TRUE, FALSE)  
+        
+        edit$selected <- rep(TRUE, nrow(dat$Twl))
+        edit$selected[ dat$Twl$Rise] <- outSr
+        edit$selected[!dat$Twl$Rise] <- outSs
+      }
     }
   })
   
@@ -913,6 +928,12 @@ server <- function(input, output, session) {
     }
     if(edit$key==39 && edit$event<length(edit$twilight)) {
       edit$event <- edit$event+1
+    }
+    if(edit$key==38 && edit$event<max(which(edit$selected))) {
+      edit$event <- min(which(edit$selected)[which(edit$selected)>edit$event])
+    }
+    if(edit$key==40 && edit$event>min(which(edit$selected))) {
+      edit$event <- max(which(edit$selected)[which(edit$selected)<edit$event])
     }
     }
   })
@@ -1222,8 +1243,8 @@ server <- function(input, output, session) {
   })
   
   
-  output$z0    <- renderText({ifelse(!is.null(dat$Calib$zenith),  dat$Calib$zenith,   "-")})
-  output$z1    <- renderText({ifelse(!is.null(dat$Calib$zenith0), dat$Calib$zenith0,  "-")})
+  output$z1    <- renderText({ifelse(!is.null(dat$Calib$zenith),  dat$Calib$zenith,   "-")})
+  output$z0    <- renderText({ifelse(!is.null(dat$Calib$zenith0), dat$Calib$zenith0,  "-")})
   output$shape <- renderText({ifelse(!is.null(dat$Calib$alpha),   dat$Calib$alpha[1], "-")})
   output$rate  <- renderText({ifelse(!is.null(dat$Calib$alpha),   dat$Calib$alpha[2], "-")})
 
