@@ -98,7 +98,6 @@ ui <- fluidPage(
                                        step = 0.00001),
                           hr(),
                           
-                          textOutput("rawLight"),
                           conditionalPanel(
                                 condition = "output.fromFile == true",
                                 fileInput("filename",
@@ -309,9 +308,9 @@ ui <- fluidPage(
                         )
                       )
              ),
-             ######################
-             ##### 4. Locations ###
-             ###################
+             ########################
+             ##### 4. Locations #####
+             #####################
              tabPanel("Track estimate",
                       sidebarLayout(
                         sidebarPanel(
@@ -332,8 +331,32 @@ ui <- fluidPage(
                           fluidRow(align="center", uiOutput("locsSlider"))
                         )
                       )
+             ),
+             ########################
+             ##### 5. Phenology #####
+             #####################
+             tabPanel("Phenology",
+                      sidebarLayout(
+                        sidebarPanel(
+                          
+                          h4("Load cond/temp recordings"),
+                          
+                          fileInput("CondTempFile",
+                                    label = "Browse for your file",
+                                    accept = c(".deg")
+                          ),
+                          
+                          hr(),
+                          
+                          downloadButton("savePrj5", "Save project")
+                          
+                        ),
+                        mainPanel(  
+                          uiOutput("selectRangePlotPhen"),
+                          plotOutput("DegImage", height = 300)
+                        )
+                      )
              )
-             
              
              #### ----
              
@@ -353,6 +376,7 @@ server <- function(input, output, session) {
                                         threshold = NULL,
                                         range     = NULL),
                            Raw = data.frame(),
+                           Deg = data.frame(),
                            Twl = data.frame(),
                            Calib = list(twl.calib = data.frame(),
                                         twl.dev   = NULL,
@@ -395,7 +419,11 @@ server <- function(input, output, session) {
     } else {
       showTab(inputId = "navbar", target = "Track estimate")
     }
-    
+    if(!input$accept_edits) {
+      hideTab(inputId = "navbar", target = "Phenology")
+    } else {
+      showTab(inputId = "navbar", target = "Phenology")
+    }
   })
   
 
@@ -434,6 +462,17 @@ server <- function(input, output, session) {
       saveRDS(s4(), file = file)
     }
   )
+  
+  output$savePrj5 <- downloadHandler(
+    filename = function() {
+      paste(dat$ID, "_", Sys.Date(), ".RData", sep="")
+    },
+    content = function(file) {
+      saveRDS(s4(), file = file)
+    }
+  )
+  
+  
   
   #############################
   #### 0. Create Project ######
@@ -1332,7 +1371,79 @@ server <- function(input, output, session) {
     }
   )
   
+  #############################
+  #### 5. Phenology ###########
+  ##########################
 
+  observeEvent(input$CondTempFile, {
+    inFile <- input$filename
+    filetype <- substr(input$filename$datapat, nchar(input$filename$datapat)-3, nchar(input$filename$datapat))
+    
+    datTmp    <- read.table(inFile$datapat, skip = 20)
+      dat$Deg <- data.frame(Date = apply(datTmp[,1:2], 1, function(x) as.POSIXct(paste0(x[1], " ", x[2]), format = "%d/%m/%Y %H:%M:%S", tz = "GMT")),
+                            Tmin = datTmp[,3], Tmax = datTmp[,4], Wets = datTmp[,5], Cond = datTmp[,6])
+      
+    if(sum(dat$Deg$Date>dat$Raw$Date[1] & dat$Deg$Date<dat$dat$Raw$Date[nrow(dat$Raw)])<(nrow(dat$Deg)*0.8)) {
+      sendSweetAlert(
+        session = session,
+        title = "Error",
+        text = "Range of .deg file does not overlap with light recordings.",
+        type = "error"
+      )
+      dat$Deg <- data.frame()
+    }
+      
+  })
+  
+  output$lightImagePhen <- renderPlot({
+    
+    if(nrow(dat$Raw)==0) {
+      plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
+    } else {
+      opar <- par(mar = c(3, 4, 4, 2))
+      lightImage(dat$Raw[dat$Mdata$range,], offset = input$offset, zlim = c(0, 10), dt = 120, xaxt = "n", yaxt = "n")
+      tsimageDeploymentLines(dat$Raw$Date[dat$Mdata$range], input$lon.calib0, input$lat.calib0, offset = input$offset,
+                             lwd = 4, col = adjustcolor("orange", alpha.f = 0.6))
+      tsimagePoints(dat$Twl$Twilight, offset = input$offset, pch = 16, cex = 0.8,
+                    col = ifelse(dat$Twl$Deleted, "grey40", ifelse(dat$Twl$Rise, "dodgerblue", "firebrick")))
+      par(opar)
+    }
+    
+  })
+  
+  output$selectRangePlotPhen <- renderUI({
+    plotOutput("lightImagePhen", height=500,
+               brush = brushOpts(id = "select_range_phen", resetOnNew = TRUE)
+    )
+  })
+  
+  
+  output$DegImage <- renderPlot({
+    
+    if(is.null(input$select_range_phen)) {
+      plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
+    } else {
+      
+      min <- format(as.POSIXct(input$select_range_phen$xmin, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+      max <- format(as.POSIXct(input$select_range_phen$xmax, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
+      
+      opar <- par(mar = c(3, 4, 4, 2))
+      lightImage(dat$Deg[dat$Deg$Date>=min & dat$Deg$Date<=max,c(1,5)], 
+              offset = input$offset, zlim = c(0, 120), dt = 120, xaxt = "n", yaxt = "n")
+      
+      tsimageDeploymentLines(dat$Raw$Date[dat$Raw$Date>=min & dat$Raw$Date<=max], input$lon.calib0, input$lat.calib0, 
+                             offset = input$offset, lwd = 4, col = adjustcolor("orange", alpha.f = 0.6))
+      
+      tsimagePoints(dat$Twl$Twilight[dat$Twl$Twilight>=min & dat$Twl$Twilight<=max], offset = input$offset, pch = 16, cex = 0.8,
+                    col = ifelse(dat$Twl$Deleted[dat$Twl$Twilight>=min & dat$Twl$Twilight<=max], "grey40", 
+                                 ifelse(dat$Twl$Rise[dat$Twl$Twilight>=min & dat$Twl$Twilight<=max], "dodgerblue", "firebrick")))
+      par(opar)
+    }
+    
+  })
+  
+  
+  
   
   ###################
   #### End ##########
