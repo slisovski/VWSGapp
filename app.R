@@ -17,7 +17,8 @@ setClass(
             Raw       = "data.frame",
             Twl       = "data.frame",
             Calib     = "list",
-            Locations = "data.frame")
+            Locations = "data.frame",
+            Phenology = "list")
 )
 
 LoadToEnvironment <- function(RData, env=new.env()) {
@@ -339,12 +340,23 @@ ui <- fluidPage(
                       sidebarLayout(
                         sidebarPanel(
                           
-                          h4("Load cond/temp recordings"),
+                          h4("Load .deg file"),
                           
                           fileInput("CondTempFile",
-                                    label = "Browse for your file",
+                                    label = "",
                                     accept = c(".deg")
                           ),
+                          
+                          hr(),
+                          
+                          fluidRow(column(width=6, verbatimTextOutput("depNB")),
+                                   column(width=5, h5("1. depNB"))),
+                          fluidRow(column(width=6, verbatimTextOutput("arrB")),
+                                   column(width=5, h5("2. arrB"))),
+                          fluidRow(column(width=6, verbatimTextOutput("depB")),
+                                   column(width=5, h5("3. depB"))),
+                          fluidRow(column(width=6, verbatimTextOutput("arrNB")),
+                                   column(width=5, h5("4. arrNB"))),
                           
                           hr(),
                           
@@ -353,7 +365,9 @@ ui <- fluidPage(
                         ),
                         mainPanel(  
                           uiOutput("selectRangePlotPhen"),
-                          plotOutput("DegImage", height = 300)
+                          plotOutput("DegImage", height=270,
+                                     click = clickOpts(id = "new_phen", clip = FALSE)),
+                          plotOutput("DegImageTemp", height = 270)
                         )
                       )
              )
@@ -391,7 +405,11 @@ server <- function(input, output, session) {
                                         zenith0   = NULL,
                                         alpha     = NULL,
                                         method    = NULL),
-                           Locations = data.frame())
+                           Locations = data.frame(),
+                           Phenology = list(depNB = NULL,
+                                            arrB  = NULL,
+                                            depB  = NULL,
+                                            arrNB = NULL))
   
   
   observe({
@@ -493,7 +511,6 @@ server <- function(input, output, session) {
     outputOptions(output, c("fromFile"), suspendWhenHidden = FALSE)
   })
   
-  
   observeEvent(input$projectFile, {
     env <- readRDS(input$projectFile$datapath)
     if(class(env) != "GeolocApp") {
@@ -579,9 +596,8 @@ server <- function(input, output, session) {
         
     }
       
-    if(nrow(env@Locations)>0) {
-      dat$Locations <- env@Locations
-    }
+    dat$Locations <- env@Locations
+    dat$Locations <- env@Locations
       
     updateTextInput(session, "loggerID", value = env@ID)
     ind$acceptS4 <- TRUE
@@ -1375,24 +1391,67 @@ server <- function(input, output, session) {
   #### 5. Phenology ###########
   ##########################
 
+  phenSelect <- reactiveValues(st = NULL, key = NULL)
+  
   observeEvent(input$CondTempFile, {
-    inFile <- input$filename
-    filetype <- substr(input$filename$datapat, nchar(input$filename$datapat)-3, nchar(input$filename$datapat))
     
-    datTmp    <- read.table(inFile$datapat, skip = 20)
-      dat$Deg <- data.frame(Date = apply(datTmp[,1:2], 1, function(x) as.POSIXct(paste0(x[1], " ", x[2]), format = "%d/%m/%Y %H:%M:%S", tz = "GMT")),
+    datTmp    <- read.table(input$CondTempFile$datapat, skip = 20)
+      dat$Deg <- data.frame(Date = as.POSIXct(apply(datTmp[,1:2], 1, function(x) paste0(x[1], " ", x[2])), format = "%d/%m/%Y %H:%M:%S", tz = "GMT"),
                             Tmin = datTmp[,3], Tmax = datTmp[,4], Wets = datTmp[,5], Cond = datTmp[,6])
       
-    if(sum(dat$Deg$Date>dat$Raw$Date[1] & dat$Deg$Date<dat$dat$Raw$Date[nrow(dat$Raw)])<(nrow(dat$Deg)*0.8)) {
-      sendSweetAlert(
-        session = session,
-        title = "Error",
-        text = "Range of .deg file does not overlap with light recordings.",
-        type = "error"
-      )
-      dat$Deg <- data.frame()
-    }
+    # if(sum(dat$Deg$Date>dat$Raw$Date[1] & dat$Deg$Date<dat$dat$Raw$Date[nrow(dat$Raw)])<(nrow(dat$Deg)*0.8)) {
+    #   sendSweetAlert(
+    #     session = session,
+    #     title = "Error",
+    #     text = "Range of .deg file does not overlap with light recordings.",
+    #     type = "error"
+    #   )
+    #   dat$Deg <- data.frame()
+    # }
       
+  })
+  
+  observeEvent(input$new_phen, {
+      edit$st <- as.POSIXct(as.numeric(input$new_phen$x), origin = "1970-01-01", tz = "GMT")
+  })
+
+  observeEvent(input$trigger,{
+      
+      phenSelect$key <- input$down
+    
+      if(input$down==49) { 
+        if(is.null(dat$Phenology$depNB)) {
+          dat$Phenology$depNB <- edit$st
+          edit$st <- NULL
+        } else {
+          dat$Phenology$depNB <- NULL
+          edit$st <- NULL
+      }}
+      if(input$down==50) { 
+        if(is.null(dat$Phenology$arrB)) {
+          dat$Phenology$arrB <- edit$st
+          edit$st <- NULL
+        } else {
+          dat$Phenology$arrB <- NULL
+          edit$st <- NULL
+      }}
+      if(input$down==51) { 
+        if(is.null(dat$Phenology$depB)) {
+          dat$Phenology$depB <- edit$st
+          edit$st <- NULL
+        } else {
+          dat$Phenology$depB <- NULL
+          edit$st <- NULL
+      }}
+      if(input$down==52) { 
+        if(is.null(dat$Phenology$arrNB)) {
+          dat$Phenology$arrNB <- edit$st
+          edit$st <- NULL
+        } else {
+          dat$Phenology$arrNB <- NULL
+          edit$st <- NULL
+      }}
+    
   })
   
   output$lightImagePhen <- renderPlot({
@@ -1400,19 +1459,25 @@ server <- function(input, output, session) {
     if(nrow(dat$Raw)==0) {
       plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
     } else {
-      opar <- par(mar = c(3, 4, 4, 2))
+      opar <- par(mar = c(2, 4, 1, 2))
       lightImage(dat$Raw[dat$Mdata$range,], offset = input$offset, zlim = c(0, 10), dt = 120, xaxt = "n", yaxt = "n")
       tsimageDeploymentLines(dat$Raw$Date[dat$Mdata$range], input$lon.calib0, input$lat.calib0, offset = input$offset,
                              lwd = 4, col = adjustcolor("orange", alpha.f = 0.6))
       tsimagePoints(dat$Twl$Twilight, offset = input$offset, pch = 16, cex = 0.8,
                     col = ifelse(dat$Twl$Deleted, "grey40", ifelse(dat$Twl$Rise, "dodgerblue", "firebrick")))
+      
+      if(!is.null(dat$Phenology$depNB)) abline(v = dat$Phenology$depNB, lwd = 3, lty = 2, col = "orange")
+      if(!is.null(dat$Phenology$arrB))  abline(v = dat$Phenology$arrB,  lwd = 3, lty = 1,  col = "chartreuse3")
+      if(!is.null(dat$Phenology$depB))  abline(v = dat$Phenology$depB,  lwd = 3, lty = 2,  col = "chartreuse3")
+      if(!is.null(dat$Phenology$arrNB)) abline(v = dat$Phenology$arrNB, lwd = 3, lty = 1, col = "orange")
+      
       par(opar)
     }
     
   })
   
   output$selectRangePlotPhen <- renderUI({
-    plotOutput("lightImagePhen", height=500,
+    plotOutput("lightImagePhen", height=250,
                brush = brushOpts(id = "select_range_phen", resetOnNew = TRUE)
     )
   })
@@ -1420,34 +1485,92 @@ server <- function(input, output, session) {
   
   output$DegImage <- renderPlot({
     
-    if(is.null(input$select_range_phen)) {
+    if(nrow(dat$Deg)==0) {
       plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
     } else {
       
-      min <- format(as.POSIXct(input$select_range_phen$xmin, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
-      max <- format(as.POSIXct(input$select_range_phen$xmax, origin = "1970-01-01", tz = "GMT"), "%Y-%m-%d")
       
-      opar <- par(mar = c(3, 4, 4, 2))
-      lightImage(dat$Deg[dat$Deg$Date>=min & dat$Deg$Date<=max,c(1,5)], 
-              offset = input$offset, zlim = c(0, 120), dt = 120, xaxt = "n", yaxt = "n")
-      
-      tsimageDeploymentLines(dat$Raw$Date[dat$Raw$Date>=min & dat$Raw$Date<=max], input$lon.calib0, input$lat.calib0, 
-                             offset = input$offset, lwd = 4, col = adjustcolor("orange", alpha.f = 0.6))
-      
-      tsimagePoints(dat$Twl$Twilight[dat$Twl$Twilight>=min & dat$Twl$Twilight<=max], offset = input$offset, pch = 16, cex = 0.8,
-                    col = ifelse(dat$Twl$Deleted[dat$Twl$Twilight>=min & dat$Twl$Twilight<=max], "grey40", 
-                                 ifelse(dat$Twl$Rise[dat$Twl$Twilight>=min & dat$Twl$Twilight<=max], "dodgerblue", "firebrick")))
-      par(opar)
+        if(is.null(input$select_range_phen)) {
+          
+          min <- min(dat$Twl$Twilight)
+          max <- max(dat$Twl$Twilight)
+        
+        } else {
+          
+          min <- as.POSIXct(input$select_range_phen$xmin, origin = "1970-01-01", tz = "GMT")
+          max <- as.POSIXct(input$select_range_phen$xmax, origin = "1970-01-01", tz = "GMT")
+        
+        }
+          
+          sset <- subset(dat$Deg, Date>=min & Date<=max)
+          
+          opar <- par(mar = c(2, 4, 1, 2), las = 1)
+          tsimage(sset$Date, sset$Cond, 
+                  offset = input$offset, zlim = c(0, 120), dt = 120, xaxt = "n", yaxt = "n")
+          
+          tsimageDeploymentLines(dat$Raw$Date[dat$Raw$Date>=min & dat$Raw$Date<=max], input$lon.calib0, input$lat.calib0, 
+                                 offset = input$offset, lwd = 4, col = adjustcolor("orange", alpha.f = 0.6))
+          
+          tsimagePoints(dat$Twl$Twilight[dat$Twl$Twilight>=min & dat$Twl$Twilight<=max], offset = input$offset, pch = 16, cex = 0.8,
+                        col = ifelse(dat$Twl$Deleted[dat$Twl$Twilight>=min & dat$Twl$Twilight<=max], "grey40", 
+                                     ifelse(dat$Twl$Rise[dat$Twl$Twilight>=min & dat$Twl$Twilight<=max], "dodgerblue", "firebrick")))
+          
+          if(!is.null(dat$Phenology$depNB)) abline(v = dat$Phenology$depNB, lwd = 3, lty = 2, col = "orange")
+          if(!is.null(dat$Phenology$arrB))  abline(v = dat$Phenology$arrB,  lwd = 3, lty = 1,  col = "chartreuse3")
+          if(!is.null(dat$Phenology$depB))  abline(v = dat$Phenology$depB,  lwd = 3, lty = 2,  col = "chartreuse3")
+          if(!is.null(dat$Phenology$arrNB)) abline(v = dat$Phenology$arrNB, lwd = 3, lty = 1, col = "orange")
+          
+          
+          if(!is.null(edit$st)) abline(v = edit$st, lwd = 3, col = "grey30")
+
+          par(opar)
     }
     
   })
   
   
+  output$DegImageTemp <- renderPlot({
+  
+    if(nrow(dat$Deg)==0) {
+      plot(1,1, type = "n", xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
+    } else {
+      
+      
+      if(is.null(input$select_range_phen)) {
+        
+        min <- min(dat$Twl$Twilight)
+        max <- max(dat$Twl$Twilight)
+        
+      } else {
+        
+        min <- as.POSIXct(input$select_range_phen$xmin, origin = "1970-01-01", tz = "GMT")
+        max <- as.POSIXct(input$select_range_phen$xmax, origin = "1970-01-01", tz = "GMT")
+        
+      }
+    
+      sset <- subset(dat$Deg, Date>=min & Date<=max)
+      
+      opar <- par(mar = c(2, 4, 1, 2), las = 1)
+      plot(sset$Date, sset$Tmin, type = "n", ylim = range(c(sset$Tmin, sset$Tmax)), xlab = "", ylab = "Temp")
+      abline(h = seq(-10,40, by = 10), lty = 2, col = "grey80")
+      polygon(c(sset$Date, rev(sset$Date)), c(sset$Tmin, rev(sset$Tmax)), col = adjustcolor("cornflowerblue", alpha.f = 0.5), border = NA)
+      lines(sset$Date, sset$Tmin, lwd = 3, col = "darkblue")
+      lines(sset$Date, sset$Tmax, lwd = 3, col = "darkmagenta")
+      par(opar)
+    }
+    
+  })
+  
+  output$depNB  <- renderText({ifelse(!is.null(dat$Phenology$depNB), format(dat$Phenology$depNB, "%Y-%m-%d"),   "-")})
+  output$arrB   <- renderText({ifelse(!is.null(dat$Phenology$arrB),  format(dat$Phenology$arrB, "%Y-%m-%d"),  "-")})
+  output$depB   <- renderText({ifelse(!is.null(dat$Phenology$depB),  format(dat$Phenology$depB, "%Y-%m-%d"), "-")})
+  output$arrNB  <- renderText({ifelse(!is.null(dat$Phenology$arrNB), format(dat$Phenology$arrNB, "%Y-%m-%d"), "-")})
   
   
   ###################
   #### End ##########
   ###################
+  
   s4 <- reactive({
       new("GeolocApp",
           ID        = dat$ID,
@@ -1455,7 +1578,8 @@ server <- function(input, output, session) {
           Raw       = dat$Raw,
           Twl       = dat$Twl,
           Calib     = dat$Calib,
-          Locations = dat$Locations)
+          Locations = dat$Locations,
+          Phenology = dat$Phenology)
   })
   
 }
